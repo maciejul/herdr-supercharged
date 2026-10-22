@@ -50,12 +50,97 @@ records that environment rather than this workflow's Ubuntu runner.
 Download with an authenticated GitHub CLI, verify checksums, then install the
 executable in a user-controlled location. For example:
 
+To replace your normal `~/.local/bin/herdr` installation on Linux x86_64/WSL:
+
 ```sh
-gh release download v0.9.5-supercharged.1 --repo Maciejul/herdr-supercharged --dir herdr-release
-cd herdr-release
-sha256sum --check SHA256SUMS
-install -m755 herdr-linux-x86_64 "$HOME/.local/bin/herdr-supercharged"
+./scripts/install-private-release.sh
+# Or select a future private release explicitly:
+./scripts/install-private-release.sh v0.9.5-supercharged.2
 ```
 
-`herdr-test` remains the separate debug-build launcher. Publishing a private
-release does not replace your installed `herdr` or configure its updater.
+The script defaults to `v0.9.5-supercharged.1`, checks the platform and glibc,
+downloads through `gh`, verifies checksums and the executable's version, then
+backs up the existing binary and atomically replaces it. It refuses to overwrite
+symlinks. Running servers, configuration, state, and integrations are untouched.
+Restart servers when active work is finished to load server-side changes;
+stopping a server ends its live pane processes. The inherited `herdr update`
+command still targets upstream, so use this script for private upgrades.
+
+## Run alongside normal Herdr as `herdr-supercharged`
+
+Use this setup to try the optimized private release without replacing
+`~/.local/bin/herdr`. Run the setup from an external WSL/Linux terminal with
+authenticated `gh` access. The release requires Linux x86_64 and glibc 2.39+.
+The existing `herdr-test` command remains the source/debug-build launcher.
+
+Download and verify the release, then install it under a separate name:
+
+```bash
+(
+  set -euo pipefail
+  release_dir=$(mktemp -d)
+  trap 'rm -rf -- "$release_dir"' EXIT
+  gh release download v0.9.5-supercharged.1 \
+    --repo Maciejul/herdr-supercharged --dir "$release_dir" \
+    --pattern herdr-linux-x86_64 --pattern SHA256SUMS \
+    --pattern build-metadata.json
+  cd "$release_dir"
+  sha256sum --check --strict SHA256SUMS
+  chmod +x herdr-linux-x86_64
+  ./herdr-linux-x86_64 --version
+  mkdir -p "$HOME/.local/bin"
+  install -m755 herdr-linux-x86_64 "$HOME/.local/bin/herdr-supercharged.new"
+  mv -f "$HOME/.local/bin/herdr-supercharged.new" "$HOME/.local/bin/herdr-supercharged"
+)
+```
+
+A different executable name alone does **not** isolate a release build: plain
+`herdr-supercharged` would still use normal Herdr's configuration and default session.
+Launch a dedicated named session instead:
+
+```bash
+env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH -u HERDR_SESSION \
+  "$HOME/.local/bin/herdr-supercharged" --session herdr-supercharged
+```
+
+This separates running panes and session layout, but still shares normal Herdr's
+global configuration. Always launch from an external
+terminal to avoid nested-Herdr restrictions.
+
+For isolated configuration and state as well, add this function to `~/.zshrc`
+(or `~/.bashrc` for Bash), then open a new terminal:
+
+```bash
+herdr-supercharged() {
+  env -u HERDR_SOCKET_PATH -u HERDR_CLIENT_SOCKET_PATH -u HERDR_SESSION \
+    -u HERDR_CONFIG_PATH \
+    XDG_CONFIG_HOME="$HOME/.config/herdr-supercharged-profile" \
+    XDG_STATE_HOME="$HOME/.local/state/herdr-supercharged-profile" \
+    "$HOME/.local/bin/herdr-supercharged" --session herdr-supercharged "$@"
+}
+```
+
+With that function loaded:
+
+```bash
+herdr-supercharged --version
+herdr-supercharged                 # Launch or reconnect to the private session.
+herdr-supercharged server stop     # Only when its active work is finished.
+```
+
+The isolated configuration is at
+`~/.config/herdr-supercharged-profile/herdr/config.toml`; state is under
+`~/.local/state/herdr-supercharged-profile/herdr/`. This starts with fresh preferences;
+it does not copy normal Herdr or debug `herdr-test` settings. XDG overrides are
+also inherited by programs launched inside its panes, so those programs may
+use separate XDG settings too. Agent integration installation can still modify
+shared agent hook files; this profile is not a sandbox for integration changes.
+
+Repeat the download block with a new tag to update the separate binary. Then
+stop and relaunch the private session when ready; stopping ends its live pane
+processes. Do not run `herdr-supercharged update`: its updater still targets upstream.
+The replacement installer above targets `~/.local/bin/herdr`, so use this separate
+download procedure when maintaining `herdr-supercharged`.
+
+Publishing a private release does not replace either installed binary or
+configure its updater.
