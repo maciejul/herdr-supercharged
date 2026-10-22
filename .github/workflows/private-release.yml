@@ -1,0 +1,120 @@
+name: Private supercharged release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing private release tag, e.g. v0.9.5-supercharged.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: private-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'Maciejul/herdr-supercharged' && github.event.repository.private == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - name: Validate private destination and existing tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-supercharged\.[0-9]+$ ]] || {
+            echo 'Expected vMAJOR.MINOR.PATCH-supercharged.NUMBER'; exit 1;
+          }
+          gh api "repos/$GITHUB_REPOSITORY" --jq '.private' | grep -qx true
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.ref' | grep -Fx "refs/tags/$RELEASE_TAG"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to overwrite it.'; exit 1
+          fi
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Verify package version and install pinned Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import os, pathlib, tomllib
+          version = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['package']['version']
+          if os.environ['RELEASE_TAG'] != 'v' + version:
+              raise SystemExit('Release tag does not match Cargo.toml version')
+          PYCODE
+          rustup show
+
+      - name: Install Zig
+        uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
+        with:
+          version: 0.16.0
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential pkg-config
+
+      - name: Build optimized Linux x86_64 binary
+        run: cargo build --release --locked --bin herdr --target x86_64-unknown-linux-gnu
+
+      - name: Smoke test and prepare assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=target/x86_64-unknown-linux-gnu/release/herdr
+          "$binary" --version | grep -Fx "herdr ${RELEASE_TAG#v}"
+          mkdir -p release-assets
+          install -m755 "$binary" release-assets/herdr-linux-x86_64
+          python3 - <<'PYCODE'
+          import datetime, json, os, pathlib, subprocess
+          metadata = {
+              'repository': os.environ['GITHUB_REPOSITORY'],
+              'tag': os.environ['RELEASE_TAG'],
+              'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'target': 'x86_64-unknown-linux-gnu',
+              'runner': 'ubuntu-24.04',
+              'built_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'rustc': subprocess.check_output(['rustc', '--version'], text=True).strip(),
+              'zig': subprocess.check_output(['zig', 'version'], text=True).strip(),
+          }
+          pathlib.Path('release-assets/build-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+          PYCODE
+          cd release-assets
+          sha256sum herdr-linux-x86_64 build-metadata.json > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Publish private release after asset verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY" --jq '.private' | grep -qx true
+          cat > "$RUNNER_TEMP/private-release-notes.md" <<'NOTES'
+          Private supercharged build of Herdr. Linux x86_64, GNU/glibc, built on Ubuntu 24.04.
+          Verify the downloaded files with `sha256sum --check SHA256SUMS`.
+          See build-metadata.json for the source commit and compiler versions.
+          This release does not update upstream distribution manifests or auto-update channels.
+          NOTES
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            --title "Herdr ${RELEASE_TAG#v} (supercharged)" --notes-file "$RUNNER_TEMP/private-release-notes.md"
+          gh release upload "$RELEASE_TAG" release-assets/herdr-linux-x86_64 release-assets/SHA256SUMS release-assets/build-metadata.json --repo "$GITHUB_REPOSITORY"
+          mkdir "$RUNNER_TEMP/private-release-verify"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/private-release-verify"
+          (cd "$RUNNER_TEMP/private-release-verify" && sha256sum --check SHA256SUMS)
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false

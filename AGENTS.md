@@ -22,8 +22,9 @@ requested; it does not run tests. The script never pushes upstream or force-push
 On a fresh clone, add `upstream` with
 `git remote add upstream https://github.com/herdrdev/herdr.git` and set
 `git config remote.pushDefault origin`. Keep private changes on `origin`.
-GitHub Actions were disabled during import; review inherited workflows and
-their publishing destinations before enabling them. During upstream merges,
+GitHub Actions run privately in this repository. Upstream publishing, website,
+and issue automation are restricted to the upstream repository. Private releases
+use `.github/workflows/private-release.yml`; see `docs/private-release.md`. During upstream merges,
 preserve this section and `scripts/sync-upstream.sh`. `CLAUDE.md` is a symlink
 to this file, so edit this single source of truth.
 
