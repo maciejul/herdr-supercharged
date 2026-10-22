@@ -133,6 +133,7 @@ pub(super) fn render_settings_overlay(
         inner.bottom().saturating_sub(tab_y + 6),
     );
     let mut choice_hits = Vec::new();
+    let mut more_below = false;
     match settings.section {
         ClientSettingsSection::Theme => {
             let visible = usize::from(content.height);
@@ -312,6 +313,7 @@ pub(super) fn render_settings_overlay(
             ];
             let visible = usize::from(content.height.saturating_sub(3));
             let scroll = settings.selected.saturating_sub(visible.saturating_sub(1));
+            more_below = scroll.saturating_add(visible) < labels.len();
             for (offset, (index, label)) in labels
                 .iter()
                 .enumerate()
@@ -374,6 +376,26 @@ pub(super) fn render_settings_overlay(
         ClientSettingsSection::Integrations => {
             render_integrations(buffer, content, settings, palette);
         }
+    }
+
+    if more_below {
+        let label = "↓ more below";
+        let x = inner.x + inner.width.saturating_sub(display_width(label)) / 2;
+        let y = inner.bottom().saturating_sub(3);
+        let style = Style::default()
+            .fg(palette.accent)
+            .bg(palette.panel_bg)
+            .add_modifier(Modifier::BOLD);
+        put_text(buffer, x, y, inner.right().saturating_sub(x), label, style);
+        // Let the terminal animate only the arrow; no client repaint timer is needed.
+        put_text(
+            buffer,
+            x,
+            y,
+            1,
+            "↓",
+            style.add_modifier(Modifier::SLOW_BLINK),
+        );
     }
 
     let installable = settings

@@ -1050,6 +1050,59 @@ fn customization_settings_tab_and_choices_are_accessible_on_narrow_terminal() {
         .any(|(_, index)| *index == 7));
 }
 
+#[test]
+fn customization_more_below_blinks_only_while_choices_are_hidden() {
+    for (width, height) in [(65, 24), (120, 40)] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state.open_settings_overlay();
+        state.select_settings_section(
+            ClientSettingsSection::Customization,
+            &mut ClientShellInput::default(),
+        );
+        let frame = state.compose(width, height).expect("customization frame");
+        let blink = crate::protocol::modifier_to_u16(Modifier::SLOW_BLINK);
+        let blinking: Vec<_> = frame
+            .cells
+            .iter()
+            .filter(|cell| cell.modifier & blink != 0)
+            .collect();
+        assert_eq!(blinking.len(), 1);
+        assert_eq!(blinking[0].symbol, "↓");
+        let text: String = frame
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+        assert!(text.contains("↓ more below"));
+
+        state.select_settings_choice(19);
+        let frame = state.compose(width, height).expect("last choice visible");
+        assert!(state
+            .hits
+            .settings_choices
+            .iter()
+            .any(|(_, index)| *index == 19));
+        assert!(frame.cells.iter().all(|cell| cell.modifier & blink == 0));
+        let text: String = frame
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+        assert!(!text.contains("more below"));
+
+        state.select_settings_section(
+            ClientSettingsSection::Theme,
+            &mut ClientShellInput::default(),
+        );
+        let frame = state
+            .compose(width, height)
+            .expect("other settings section");
+        assert!(frame.cells.iter().all(|cell| cell.modifier & blink == 0));
+    }
+}
+
 fn tracking_settings_state(enabled: Option<bool>) -> ClientShellState {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
     let mut projected = snapshot();
@@ -1093,6 +1146,7 @@ fn tracking_setting_requires_confirmation_for_enable_and_disable() {
         let text = frame_rows(&frame).join("\n");
         assert!(text.contains("Session-resume hooks are preserved"));
         assert!(text.contains("all Herdr sessions on this machine"));
+        assert!(!text.contains("more below"));
         assert!(state.hits.settings_choices.is_empty());
         let confirmed = state.handle_input_bytes(b"\r");
         assert!(

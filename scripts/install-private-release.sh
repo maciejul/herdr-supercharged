@@ -6,7 +6,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/install-private-release.sh [vMAJOR.MINOR.PATCH-supercharged.NUMBER]
 
-Defaults to v0.9.5-supercharged.1. Requires authenticated GitHub CLI access to
+Defaults to v0.9.5-supercharged.2. Requires authenticated GitHub CLI access to
 Maciejul/herdr-supercharged and Linux x86_64 with glibc 2.39 or newer.
 Installs to ~/.local/bin/herdr, keeping a timestamped backup beside it.
 Does not stop servers, change configuration, or install agent integrations.
@@ -17,7 +17,7 @@ if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
   usage
   exit 0
 fi
-tag=${1:-v0.9.5-supercharged.1}
+tag=${1:-v0.9.5-supercharged.2}
 if (( $# > 1 )) || [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-supercharged\.[0-9]+$ ]]; then
   usage >&2
   exit 1
