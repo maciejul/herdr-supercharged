@@ -111,6 +111,9 @@ impl App {
                     let Some(pane) = tab.panes.get(&info.id) else {
                         continue;
                     };
+                    if pane.suspension_exit_pending || (pane.suspended && !pane.seen) {
+                        continue;
+                    }
                     if self
                         .terminal_runtimes
                         .get(&pane.attached_terminal_id)
@@ -190,6 +193,9 @@ impl App {
             ws.tabs.iter().find_map(|tab| {
                 tab.layout.pane_ids().into_iter().find_map(|pane_id| {
                     let pane = tab.panes.get(&pane_id)?;
+                    if pane.suspension_exit_pending || (pane.suspended && !pane.seen) {
+                        return None;
+                    }
                     if &pane.attached_terminal_id != terminal_id {
                         return None;
                     }
@@ -255,8 +261,11 @@ impl App {
         };
 
         if !cwd.is_dir() {
+            let suspended = self.defer_failed_suspended_resume(pane_id);
             if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
-                terminal.pending_agent_resume_plan = None;
+                if !suspended {
+                    terminal.pending_agent_resume_plan = None;
+                }
                 terminal.restore_error = Some("Saved directory is unavailable. Restore the directory and restart this session.".into());
                 terminal.revision = terminal.revision.saturating_add(1);
             }
@@ -286,8 +295,11 @@ impl App {
                     err = %err,
                     "failed to start shell for deferred agent resume"
                 );
+                let suspended = self.defer_failed_suspended_resume(pane_id);
                 if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
-                    terminal.pending_agent_resume_plan = None;
+                    if !suspended {
+                        terminal.pending_agent_resume_plan = None;
+                    }
                     terminal.restore_error = Some(format!("Could not start the saved shell: {err}. Fix the shell configuration and restart this session."));
                     terminal.revision = terminal.revision.saturating_add(1);
                 }
@@ -306,13 +318,22 @@ impl App {
                 "failed to send deferred agent resume command to shell"
             );
             runtime.shutdown();
+            self.defer_failed_suspended_resume(pane_id);
             return false;
         }
 
         self.terminal_runtimes.insert(terminal_id.clone(), runtime);
+        for ws in &mut self.state.workspaces {
+            if let Some(pane) = ws.pane_state_mut(pane_id) {
+                pane.suspended = false;
+                pane.unread_since = None;
+                break;
+            }
+        }
         if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
             terminal.pending_agent_resume_plan = None;
             terminal.respawn_shell_on_exit = false;
+            terminal.restore_error = None;
         }
         true
     }

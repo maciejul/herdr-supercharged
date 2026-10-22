@@ -40,6 +40,7 @@ impl App {
             Err(err) => return encode_error(id, "integration_install_failed", err.to_string()),
         };
         self.state.integration_recommendations = crate::integration::integration_recommendations();
+        self.refresh_background_tracking();
 
         encode_success(
             id,
@@ -61,6 +62,7 @@ impl App {
             Err(err) => return encode_error(id, "integration_uninstall_failed", err.to_string()),
         };
         self.state.integration_recommendations = crate::integration::integration_recommendations();
+        self.refresh_background_tracking();
 
         encode_success(
             id,

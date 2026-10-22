@@ -318,7 +318,7 @@ fn context_menus_capture_stable_targets_and_route_actions() {
         })) if workspace_id == "ws_1"
     ));
     let workspace_items = match state.overlay.as_ref() {
-        Some(ClientShellOverlay::ContextMenu(menu)) => menu.items(),
+        Some(ClientShellOverlay::ContextMenu(menu)) => menu.items(true),
         _ => panic!("workspace context menu"),
     };
     assert!(workspace_items
@@ -352,7 +352,7 @@ fn context_menus_capture_stable_targets_and_route_actions() {
     state.compose(106, 20).expect("pane context menu");
     let split_index = match state.overlay.as_ref() {
         Some(ClientShellOverlay::ContextMenu(menu)) => menu
-            .items()
+            .items(true)
             .iter()
             .position(|item| item.action == ClientContextMenuAction::SplitRight)
             .expect("split right item"),

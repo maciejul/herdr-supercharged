@@ -145,6 +145,16 @@ pub(crate) fn install_claude() -> io::Result<ClaudeInstallPaths> {
         "{}".to_string()
     };
     let updated_settings = install_claude_settings(&existing_settings, &settings_path, &hook_path)?;
+    #[cfg(unix)]
+    let updated_settings = super::background_hooks::edit(
+        &updated_settings,
+        &settings_path,
+        &hook_path,
+        "claude",
+        true,
+    )?;
+    #[cfg(unix)]
+    super::background_hooks::install_file(&hook_path)?;
     remove_legacy_bash_hook_file(&hook_path)?;
 
     if updated_settings != existing_settings {
@@ -202,7 +212,13 @@ pub(crate) fn install_codex() -> io::Result<CodexInstallPaths> {
     )?;
     remove_legacy_bash_hook_file(&hook_path)?;
 
-    write_config(&hooks_path, serde_json::to_string_pretty(&hooks_file)?)?;
+    let hooks_content = serde_json::to_string_pretty(&hooks_file)?;
+    #[cfg(unix)]
+    let hooks_content =
+        super::background_hooks::edit(&hooks_content, &hooks_path, &hook_path, "codex", true)?;
+    #[cfg(unix)]
+    super::background_hooks::install_file(&hook_path)?;
+    write_config(&hooks_path, hooks_content)?;
 
     let config_path = dir.join("config.toml");
     let existing_config = if config_path.is_file() {
@@ -583,6 +599,14 @@ pub(crate) fn uninstall_claude() -> io::Result<ClaudeUninstallResult> {
         let existing_settings = fs::read_to_string(&settings_path)?;
         let new_settings =
             uninstall_claude_settings(&existing_settings, &settings_path, &hook_path)?;
+        #[cfg(unix)]
+        let new_settings = super::background_hooks::edit(
+            &new_settings,
+            &settings_path,
+            &hook_path,
+            "claude",
+            false,
+        )?;
         updated_settings = new_settings != existing_settings;
         if updated_settings {
             write_config(&settings_path, new_settings)?;
@@ -591,6 +615,9 @@ pub(crate) fn uninstall_claude() -> io::Result<ClaudeUninstallResult> {
 
     let removed_hook_file =
         remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
+
+    #[cfg(unix)]
+    let removed_hook_file = removed_hook_file | super::background_hooks::remove_file(&hook_path)?;
 
     Ok(ClaudeUninstallResult {
         hook_path,
@@ -633,13 +660,29 @@ pub(crate) fn uninstall_codex() -> io::Result<CodexUninstallResult> {
             updated_hooks |= remove_hook_commands(hooks, "Interrupt", &hook_path, Some("idle"))?;
         }
 
+        let hooks_content = serde_json::to_string_pretty(&hooks_file)?;
+        #[cfg(unix)]
+        let hooks_content = {
+            let updated = super::background_hooks::edit(
+                &hooks_content,
+                &hooks_path,
+                &hook_path,
+                "codex",
+                false,
+            )?;
+            updated_hooks |= updated != hooks_content;
+            updated
+        };
         if updated_hooks {
-            write_config(&hooks_path, serde_json::to_string_pretty(&hooks_file)?)?;
+            write_config(&hooks_path, hooks_content)?;
         }
     }
 
     let removed_hook_file =
         remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
+
+    #[cfg(unix)]
+    let removed_hook_file = removed_hook_file | super::background_hooks::remove_file(&hook_path)?;
 
     Ok(CodexUninstallResult {
         hook_path,

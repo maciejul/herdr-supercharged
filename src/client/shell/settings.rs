@@ -31,9 +31,99 @@ pub(super) fn integration_needs_install(info: &crate::api::schema::IntegrationIn
         || info.available && info.state == crate::api::schema::IntegrationState::NotInstalled
 }
 
+pub(super) fn background_tracking_enabled(snapshot: Option<&ClientShellSnapshot>) -> Option<bool> {
+    let commands = &snapshot?.commands;
+    if commands
+        .iter()
+        .any(|command| command.command_id == "tracking.disable")
+    {
+        Some(true)
+    } else if commands
+        .iter()
+        .any(|command| command.command_id == "tracking.enable")
+    {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+pub(super) fn unread_suspend_delay(
+    snapshot: Option<&ClientShellSnapshot>,
+) -> Option<(&str, &'static str)> {
+    snapshot?.commands.iter().find_map(|command| {
+        let value = command.command_id.strip_prefix("unread-suspend.delay.")?;
+        let label = match value {
+            "0" => "Immediate",
+            "3600" => "1h",
+            "14400" => "4h",
+            "28800" => "8h",
+            "86400" => "24h (default)",
+            "172800" => "48h",
+            _ => return None,
+        };
+        Some((command.command_id.as_str(), label))
+    })
+}
+
 impl ClientShellState {
+    fn confirm_background_tracking(
+        &mut self,
+        enable: bool,
+        endpoint: &ClientEndpointId,
+        outcome: &mut ClientShellInput,
+    ) {
+        let expected = Some(!enable);
+        if endpoint != &self.active_endpoint_id
+            || background_tracking_enabled(self.snapshot.as_deref()) != expected
+        {
+            if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
+                settings.tracking_confirmation = None;
+                settings.tracking_message = Some(
+                    "Tracking availability changed. Review the current state and try again.".into(),
+                );
+            }
+            outcome.repaint = true;
+            return;
+        }
+        let params = crate::api::schema::CommandInvokeParams {
+            command_id: if enable {
+                "tracking.enable"
+            } else {
+                "tracking.disable"
+            }
+            .into(),
+            workspace_id: None,
+            tab_id: None,
+            pane_id: None,
+            selection: None,
+        };
+        let submitted = self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::CommandInvoke(params),
+            PendingEndpointKind::BackgroundTracking,
+            outcome,
+        );
+        if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
+            settings.tracking_confirmation = None;
+            settings.tracking_pending = submitted;
+            settings.tracking_message = Some(
+                if submitted {
+                    "Updating tracking hooks…"
+                } else {
+                    "Tracking update could not be sent to this machine."
+                }
+                .into(),
+            );
+        }
+        outcome.repaint = true;
+    }
+
     pub(super) fn open_settings_overlay(&mut self) {
         self.overlay = Some(ClientShellOverlay::Settings(ClientSettingsOverlay {
+            customization: self.config.preferences.customization.clone(),
+            tracking_confirmation: None,
+            tracking_pending: false,
+            tracking_message: None,
             section: ClientSettingsSection::Theme,
             selected: theme_index(&self.config.theme_name),
             original_theme_name: self.config.theme_name.clone(),
@@ -51,7 +141,7 @@ impl ClientShellState {
             ClientSettingsSection::Indicators => indicator_index(self.config.status_indicators),
             ClientSettingsSection::Sound => usize::from(!self.config.sound_enabled),
             ClientSettingsSection::Toast => toast_index(self.config.toast_delivery),
-            ClientSettingsSection::Integrations => 0,
+            ClientSettingsSection::Integrations | ClientSettingsSection::Customization => 0,
         }
     }
 
@@ -71,6 +161,7 @@ impl ClientShellState {
                 }))
             );
         if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
+            settings.tracking_confirmation = None;
             settings.section = section;
             settings.selected = selected;
         }
@@ -99,6 +190,7 @@ impl ClientShellState {
                 ClientSettingsSection::Theme => crate::config::THEME_NAMES.len(),
                 ClientSettingsSection::Indicators | ClientSettingsSection::Sound => 2,
                 ClientSettingsSection::Toast => 4,
+                ClientSettingsSection::Customization => 20,
                 ClientSettingsSection::Integrations => settings.integrations.len(),
             },
             _ => 0,
@@ -152,6 +244,11 @@ impl ClientShellState {
     }
 
     pub(super) fn cancel_settings_overlay(&mut self) {
+        if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
+            if settings.tracking_confirmation.take().is_some() {
+                return;
+            }
+        }
         let Some(ClientShellOverlay::Settings(settings)) = self.overlay.take() else {
             return;
         };
@@ -185,6 +282,13 @@ impl ClientShellState {
         let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_ref() else {
             return;
         };
+        if settings.tracking_pending {
+            return;
+        }
+        if let Some((enable, endpoint_id)) = settings.tracking_confirmation.clone() {
+            self.confirm_background_tracking(enable, &endpoint_id, outcome);
+            return;
+        }
         let section = settings.section;
         let selected = settings.selected;
         match section {
@@ -221,6 +325,117 @@ impl ClientShellState {
                     crate::config::ConfigEdit::ToastDelivery(delivery),
                     outcome,
                 );
+            }
+            ClientSettingsSection::Customization => {
+                if selected == 19 {
+                    let command =
+                        unread_suspend_delay(self.snapshot.as_deref()).map(|(id, _)| id.to_owned());
+                    let submitted = command.is_some_and(|command_id| {
+                        self.push_endpoint_method_with_kind(
+                            crate::api::schema::Method::CommandInvoke(
+                                crate::api::schema::CommandInvokeParams {
+                                    command_id,
+                                    workspace_id: None,
+                                    tab_id: None,
+                                    pane_id: None,
+                                    selection: None,
+                                },
+                            ),
+                            PendingEndpointKind::UnreadSuspendDelay,
+                            outcome,
+                        )
+                    });
+                    if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
+                        settings.tracking_pending = submitted;
+                        settings.tracking_message = Some(
+                            if submitted {
+                                "Updating unread suspension delay…"
+                            } else {
+                                "Unread suspension settings are unavailable on this machine."
+                            }
+                            .into(),
+                        );
+                    }
+                    outcome.repaint = true;
+                    return;
+                }
+                if selected == 8 {
+                    let enabled = background_tracking_enabled(self.snapshot.as_deref());
+                    if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
+                        settings.tracking_message = None;
+                        if let Some(enabled) = enabled {
+                            settings.tracking_confirmation =
+                                Some((!enabled, self.active_endpoint_id.clone()));
+                        } else {
+                            settings.tracking_message = Some("Tracking is unavailable on this machine. Install or update its Claude/Codex integrations first.".into());
+                        }
+                    }
+                    outcome.repaint = true;
+                    return;
+                }
+                let customization = &mut self.config.preferences.customization;
+                match selected {
+                    0 => customization.space_groups_enabled = !customization.space_groups_enabled,
+                    1 => {
+                        customization.show_selected_tab_name = !customization.show_selected_tab_name
+                    }
+                    2 => {
+                        customization.selected_tab_name_as_workspace =
+                            !customization.selected_tab_name_as_workspace
+                    }
+                    3 => customization.colors.working = customization.colors.working.next(),
+                    4 => customization.colors.subagents = customization.colors.subagents.next(),
+                    5 => {
+                        customization.colors.background_tasks =
+                            customization.colors.background_tasks.next()
+                    }
+                    6 => customization.colors.completion = customization.colors.completion.next(),
+                    7 => *customization = preferences::CustomizationPreferences::default(),
+                    9 => {
+                        customization.rename_workspace_with_tab =
+                            !customization.rename_workspace_with_tab
+                    }
+                    10 => {
+                        customization.show_agent_status_dividers =
+                            !customization.show_agent_status_dividers
+                    }
+                    11 => {
+                        customization.show_workspace_activity =
+                            !customization.show_workspace_activity
+                    }
+                    12 => customization.show_agent_activity = !customization.show_agent_activity,
+                    13 => {
+                        customization.include_agent_shell_tasks =
+                            !customization.include_agent_shell_tasks
+                    }
+                    14 => {
+                        customization.include_terminal_shell_tasks =
+                            !customization.include_terminal_shell_tasks
+                    }
+                    15 => {
+                        customization.highlight_workspace_activity =
+                            !customization.highlight_workspace_activity
+                    }
+                    16 => {
+                        customization.colors.workspace_activity =
+                            customization.colors.workspace_activity.next()
+                    }
+                    17 => customization.automatic_tab_names = !customization.automatic_tab_names,
+                    18 => {
+                        customization.automatic_workspace_names =
+                            !customization.automatic_workspace_names
+                    }
+                    _ => return,
+                }
+                if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
+                    settings.customization = customization.clone();
+                }
+                if matches!(selected, 7 | 17 | 18) {
+                    self.refresh_automatic_names();
+                }
+                self.reveal_focused_workspace = true;
+                self.persist_chrome_preferences(outcome);
+                outcome.repaint = true;
             }
             ClientSettingsSection::Integrations => self.install_recommended_integrations(outcome),
         }
@@ -290,6 +505,29 @@ impl ClientShellState {
         result: Result<crate::api::schema::ResponseResult, ClientShellEndpointError>,
     ) -> (bool, Vec<ClientShellAction>) {
         match kind {
+            PendingEndpointKind::UnreadSuspendDelay => {
+                if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
+                    settings.tracking_pending = false;
+                    settings.tracking_message = Some(match result {
+                        Ok(crate::api::schema::ResponseResult::Ok {}) => {
+                            "Unread suspension delay saved for this machine.".into()
+                        }
+                        Ok(_) => "Machine returned an unexpected settings response.".into(),
+                        Err(error) => format!("Unread suspension update failed: {}", error.message),
+                    });
+                }
+                (true, Vec::new())
+            }
+            PendingEndpointKind::BackgroundTracking => {
+                if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
+                    settings.tracking_pending = false;
+                    settings.tracking_message = Some(match result {
+                        Ok(_) => "Tracking hooks updated for this machine. Restart running Claude/Codex sessions to load the change.".into(),
+                        Err(error) => format!("Tracking update failed: {}", error.message),
+                    });
+                }
+                (true, Vec::new())
+            }
             PendingEndpointKind::IntegrationList => {
                 if let Some(ClientShellOverlay::Settings(settings)) = self.overlay.as_mut() {
                     settings.loading_integrations = false;

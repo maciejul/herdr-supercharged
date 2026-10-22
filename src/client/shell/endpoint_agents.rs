@@ -25,17 +25,22 @@ pub(super) fn render_collapsed(
                 "{initial}{}",
                 status_icon(row.agent.status, config.status_indicators)
             ),
-            Style::default()
-                .fg(if row.stale {
-                    config.palette.overlay0
+            if row.stale {
+                Style::default()
+                    .fg(config.palette.overlay0)
+                    .add_modifier(Modifier::DIM)
+            } else {
+                if row.agent.activity_only {
+                    Style::default().fg(config
+                        .preferences
+                        .customization
+                        .colors
+                        .background_tasks
+                        .color())
                 } else {
-                    status_color(row.agent.status, &config.palette)
-                })
-                .add_modifier(if row.stale {
-                    Modifier::DIM
-                } else {
-                    Modifier::empty()
-                }),
+                    config.status_icon_style(row.agent.status)
+                }
+            },
         );
         hits.endpoint_agents
             .push((rect, row.endpoint_id, row.agent.pane_id));
@@ -50,6 +55,8 @@ pub(super) fn render_expanded(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    expanded: &HashSet<(ClientEndpointId, String)>,
+    offsets: &HashMap<(ClientEndpointId, String), usize>,
     hits: &mut ShellHitMap,
 ) {
     if !super::agent_sidebar::render_agent_panel_header(
@@ -70,19 +77,34 @@ pub(super) fn render_expanded(
         config,
         agent_scroll,
         hits,
-        |row| row.agent.rows.len(),
+        |row| {
+            row.agent.line_count(
+                expanded.contains(&(row.endpoint_id.clone(), row.agent.pane_id.clone())),
+            )
+        },
+        |row| row.agent.status,
         |buffer, rect, row, hits| {
-            super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
+            let parent = super::agent_sidebar::render_agent_with_activity(
+                buffer,
+                rect,
+                &row.agent,
+                &row.endpoint_id,
+                expanded,
+                offsets,
+                config,
+                hits,
+            );
             if row.stale {
                 buffer.set_style(
                     rect,
                     Style::default()
                         .fg(config.palette.overlay0)
+                        .remove_modifier(Modifier::BOLD)
                         .add_modifier(Modifier::DIM),
                 );
             }
             hits.endpoint_agents
-                .push((rect, row.endpoint_id.clone(), row.agent.pane_id.clone()));
+                .push((parent, row.endpoint_id.clone(), row.agent.pane_id.clone()));
         },
     );
 }
@@ -106,7 +128,26 @@ impl ClientShellState {
         };
         let heights = rows
             .iter()
-            .map(|row| row.agent.rows.len().max(1).min(u16::MAX as usize) as u16)
+            .enumerate()
+            .map(|(index, row)| {
+                (row.agent
+                    .line_count(
+                        self.expanded_background_activity
+                            .contains(&(row.endpoint_id.clone(), row.agent.pane_id.clone())),
+                    )
+                    .min(u16::MAX as usize) as u16)
+                    .saturating_add(u16::from(super::agent_sidebar::agent_section_start(
+                        index
+                            .checked_sub(1)
+                            .map(|previous| rows[previous].agent.status),
+                        row.agent.status,
+                        body_height,
+                        self.config
+                            .preferences
+                            .customization
+                            .show_agent_status_dividers,
+                    )))
+            })
             .collect::<Vec<_>>();
         let mut gaps = vec![self.config.agents.row_gap; rows.len()];
         if let Some(last) = gaps.last_mut() {
@@ -146,7 +187,8 @@ fn agent_rows(
                             snapshot,
                             &agent.pane_id,
                             config,
-                            Some(&endpoint.label),
+                            (endpoints.len() > 1 || !endpoint.endpoint_id.is_local())
+                                .then_some(endpoint.label.as_str()),
                         )
                     })
                     .map(|agent| ((endpoint.endpoint_id.clone(), agent.pane_id.clone()), agent))

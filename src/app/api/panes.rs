@@ -1717,6 +1717,13 @@ impl App {
             Ok(source) => source,
             Err(message) => return encode_error(id, "invalid_metadata_source", message),
         };
+        if source.starts_with("herdr:background:") && self.background_tracking_disabled() {
+            return encode_error(
+                id,
+                "tracking_disabled",
+                "background activity tracking is disabled",
+            );
+        }
         let raw_title_set = params.title.is_some();
         let raw_display_agent_set = params.display_agent.is_some();
         let raw_state_labels_set = !params.state_labels.is_empty();

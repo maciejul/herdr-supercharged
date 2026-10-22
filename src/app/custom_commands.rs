@@ -22,6 +22,8 @@ pub(super) fn new_command_namespace() -> String {
 #[derive(Debug)]
 pub(super) struct EndpointCommandRegistry {
     entries: Vec<EndpointCommand>,
+    #[cfg(unix)]
+    background_tracking: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -43,7 +45,11 @@ impl EndpointCommandRegistry {
                 binding: binding.clone(),
             })
             .collect();
-        Self { entries }
+        Self {
+            entries,
+            #[cfg(unix)]
+            background_tracking: None,
+        }
     }
 }
 
@@ -53,7 +59,8 @@ impl App {
     }
 
     pub(crate) fn client_shell_command_manifest(&self) -> Vec<crate::protocol::ClientShellCommand> {
-        self.endpoint_commands
+        let commands: Vec<_> = self
+            .endpoint_commands
             .entries
             .iter()
             .map(|entry| crate::protocol::ClientShellCommand {
@@ -63,7 +70,63 @@ impl App {
                 action: entry.action,
                 description: entry.binding.description.clone(),
             })
-            .collect()
+            .collect();
+        #[cfg(unix)]
+        let commands = {
+            let mut commands = commands;
+            if let Some(enabled) = self.endpoint_commands.background_tracking {
+                commands.push(crate::protocol::ClientShellCommand {
+                    command_id: if enabled {
+                        "tracking.disable"
+                    } else {
+                        "tracking.enable"
+                    }
+                    .to_owned(),
+                    binding_label: String::new(),
+                    binding_labels: Vec::new(),
+                    action: crate::protocol::ClientShellCommandAction::Shell,
+                    description: Some(
+                        if enabled {
+                            "Disable background task tracking"
+                        } else {
+                            "Enable background task tracking"
+                        }
+                        .to_owned(),
+                    ),
+                });
+            }
+            commands
+        };
+        let mut commands = commands;
+        if self.policy.persist_session {
+            commands.push(crate::protocol::ClientShellCommand {
+                command_id: self.unread_suspend_delay_command(),
+                binding_label: String::new(),
+                binding_labels: Vec::new(),
+                action: crate::protocol::ClientShellCommandAction::Shell,
+                description: Some("Change unread tab suspension delay".to_owned()),
+            });
+        }
+        commands
+    }
+
+    pub(crate) fn refresh_background_tracking(&mut self) {
+        #[cfg(unix)]
+        {
+            self.endpoint_commands.background_tracking =
+                crate::integration::background_tracking_enabled();
+        }
+    }
+
+    pub(crate) fn background_tracking_disabled(&self) -> bool {
+        #[cfg(unix)]
+        {
+            self.endpoint_commands.background_tracking == Some(false)
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
     }
 
     pub(crate) fn resolve_client_shell_command(
@@ -82,6 +145,71 @@ impl App {
         id: String,
         params: crate::api::schema::CommandInvokeParams,
     ) -> String {
+        if params.command_id.starts_with("unread-suspend.delay.") {
+            if !self.policy.persist_session
+                || params.command_id != self.unread_suspend_delay_command()
+            {
+                return crate::app::api::responses::encode_error(
+                    id,
+                    "command_not_found",
+                    "unread suspension setting changed; refresh and try again",
+                );
+            }
+            return match self.cycle_unread_suspend_delay() {
+                Ok(()) => crate::app::api::responses::encode_success(
+                    id,
+                    crate::api::schema::ResponseResult::Ok {},
+                ),
+                Err(error) => crate::app::api::responses::encode_error(
+                    id,
+                    "setting_update_failed",
+                    error.to_string(),
+                ),
+            };
+        }
+        #[cfg(unix)]
+        if matches!(
+            params.command_id.as_str(),
+            "tracking.enable" | "tracking.disable"
+        ) {
+            let enabled = params.command_id == "tracking.enable";
+            if self.endpoint_commands.background_tracking != Some(!enabled) {
+                return crate::app::api::responses::encode_error(
+                    id,
+                    "command_not_found",
+                    "background tracking command is unavailable or stale",
+                );
+            }
+            if let Err(error) = crate::integration::set_background_tracking_enabled(enabled) {
+                self.refresh_background_tracking();
+                return crate::app::api::responses::encode_error(
+                    id,
+                    "tracking_update_failed",
+                    error.to_string(),
+                );
+            }
+            self.refresh_background_tracking();
+            if !enabled {
+                let patch = std::collections::HashMap::from([(
+                    "herdr_background_activity".to_owned(),
+                    None,
+                )]);
+                for terminal in self.state.terminals.values_mut() {
+                    if terminal.metadata_tokens.patch(
+                        patch.clone(),
+                        None,
+                        std::time::Instant::now(),
+                    ) {
+                        terminal.revision = terminal.revision.saturating_add(1);
+                    }
+                }
+                self.sync_agent_metadata_deadline();
+            }
+            return crate::app::api::responses::encode_success(
+                id,
+                crate::api::schema::ResponseResult::Ok {},
+            );
+        }
         let Some(binding) = self.resolve_client_shell_command(&params.command_id) else {
             return crate::app::api::responses::encode_error(
                 id,
@@ -595,6 +723,35 @@ mod tests {
 
     fn install(app: &mut crate::app::App, binding: crate::config::CustomCommandKeybind) {
         app.endpoint_commands = super::EndpointCommandRegistry::new(&[binding]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tracking_manifest_uses_cached_state_and_rejects_unadvertised_commands() {
+        let mut app = test_app();
+        assert!(app.client_shell_command_manifest().is_empty());
+        app.endpoint_commands.background_tracking = Some(true);
+        assert_eq!(
+            app.client_shell_command_manifest()[0].command_id,
+            "tracking.disable"
+        );
+        app.endpoint_commands.background_tracking = Some(false);
+        assert_eq!(
+            app.client_shell_command_manifest()[0].command_id,
+            "tracking.enable"
+        );
+        let response = app.handle_command_invoke(
+            "tracking-stale".into(),
+            crate::api::schema::CommandInvokeParams {
+                command_id: "tracking.disable".into(),
+                workspace_id: None,
+                tab_id: None,
+                pane_id: None,
+                selection: None,
+            },
+        );
+        let error: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(error.error.code, "command_not_found");
     }
 
     #[test]

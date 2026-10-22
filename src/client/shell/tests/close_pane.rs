@@ -40,7 +40,7 @@ fn request_close(state: &mut ClientShellState, menu: bool) -> ClientShellInput {
         state.compose(106, 24).unwrap();
         let index = match state.overlay.as_ref() {
             Some(ClientShellOverlay::ContextMenu(menu)) => menu
-                .items()
+                .items(true)
                 .iter()
                 .position(|item| item.action == ClientContextMenuAction::ClosePane)
                 .unwrap(),

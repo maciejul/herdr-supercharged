@@ -264,10 +264,15 @@ pub(super) fn online_agent_targets(
     endpoints: &[ClientShellEndpoint],
     active_endpoint_id: &ClientEndpointId,
     sort: crate::config::AgentPanelSortConfig,
+    include_terminal_shell_tasks: bool,
 ) -> Vec<AggregateAgentTarget> {
     aggregate_agent_rows(endpoints, active_endpoint_id, sort)
         .into_iter()
-        .filter(|row| !row.endpoint.stale())
+        .filter(|row| {
+            !row.endpoint.stale()
+                && (include_terminal_shell_tasks
+                    || !super::background_activity::activity_only(&row.agent.tokens))
+        })
         .map(|row| AggregateAgentTarget {
             endpoint_id: row.endpoint.endpoint_id.clone(),
             pane_id: row.agent.pane_id.clone(),

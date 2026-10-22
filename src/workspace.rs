@@ -441,11 +441,14 @@ impl Workspace {
 
     pub fn tab_display_name(&self, tab_idx: usize) -> Option<String> {
         let tab = self.tabs.get(tab_idx)?;
-        Some(
-            tab.custom_name
-                .clone()
-                .unwrap_or_else(|| (tab_idx + 1).to_string()),
-        )
+        let mut name = tab
+            .custom_name
+            .clone()
+            .unwrap_or_else(|| (tab_idx + 1).to_string());
+        if tab.panes.values().any(|pane| pane.suspended) {
+            name.push_str(" (Suspended)");
+        }
+        Some(name)
     }
 
     pub fn switch_tab(&mut self, idx: usize) {
@@ -454,6 +457,7 @@ impl Workspace {
             if let Some(tab) = self.tabs.get_mut(idx) {
                 for pane in tab.panes.values_mut() {
                     pane.seen = true;
+                    pane.unread_since = None;
                 }
             }
         }

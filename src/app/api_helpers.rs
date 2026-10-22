@@ -264,6 +264,16 @@ pub(super) fn normalize_metadata_tokens(
             {
                 return Err(format!("invalid metadata token key: {key}"));
             }
+            if key == "herdr_background_activity" {
+                if let Some(ref text) = value {
+                    if text.len() > 16_384
+                        || serde_json::from_str::<serde_json::Value>(text).is_err()
+                    {
+                        return Err("background activity must be valid JSON up to 16 KiB".into());
+                    }
+                }
+                return Ok((key, value));
+            }
             let value = value.and_then(|value| {
                 let normalized = value
                     .trim()
@@ -281,6 +291,23 @@ pub(super) fn normalize_metadata_tokens(
 #[cfg(test)]
 mod metadata_token_tests {
     use super::*;
+
+    #[test]
+    fn background_activity_is_bounded_json_and_not_truncated() {
+        let value = serde_json::json!({"items": [{"id": "a", "kind": "subagent", "label": "x".repeat(96)}]}).to_string();
+        let normalize = |text: String| {
+            normalize_metadata_tokens(std::collections::HashMap::from([(
+                "herdr_background_activity".into(),
+                Some(text),
+            )]))
+        };
+        assert_eq!(
+            normalize(value.clone()).unwrap()["herdr_background_activity"],
+            Some(value)
+        );
+        assert!(normalize("broken".into()).is_err());
+        assert!(normalize(format!("\"{}\"", "x".repeat(16_384))).is_err());
+    }
 
     #[test]
     fn token_normalization_sanitizes_values_and_turns_empty_into_clear() {

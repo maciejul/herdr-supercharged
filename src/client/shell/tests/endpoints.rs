@@ -74,6 +74,42 @@ fn state_with_remote() -> (ClientShellState, ClientEndpointId) {
 }
 
 #[test]
+fn machine_headings_hide_for_local_only_and_return_with_remote_machines() {
+    let (mut state, _) = state_with_remote();
+    state.save_space_group(
+        Some("ws_1".into()),
+        None,
+        "Work",
+        &mut ClientShellInput::default(),
+    );
+    state.compose(100, 40).expect("multiple machines");
+    assert_eq!(state.hits.machines.len(), 2);
+
+    state.set_endpoint_catalog(&[]);
+    state.collapsed_endpoints.insert(ClientEndpointId::Local);
+    let frame = state.compose(100, 40).expect("local groups");
+    let text = frame
+        .cells
+        .iter()
+        .map(|cell| cell.symbol.as_str())
+        .collect::<String>();
+    assert!(!text.contains("Local"));
+    assert!(state.hits.machines.is_empty());
+    assert_eq!(state.hits.space_groups.len(), 1);
+    assert!(!state.hits.workspaces.is_empty());
+
+    state.sidebar_collapsed = true;
+    state.compose(100, 40).expect("compact local sidebar");
+    assert!(state.hits.machines.is_empty());
+    assert!(!state.hits.workspaces.is_empty());
+
+    state.sidebar_collapsed = false;
+    state.set_endpoint_catalog(&[remote_profile()]);
+    state.compose(100, 40).expect("machine headers restored");
+    assert_eq!(state.hits.machines.len(), 2);
+}
+
+#[test]
 fn workspace_navigation_waits_for_the_target_presentation_fence() {
     use crate::client::endpoint::{EndpointNegotiation, EndpointRegistry};
     use crate::client::endpoint_commands::EndpointCommands;
@@ -711,6 +747,11 @@ fn agent_navigation_keeps_scroll_when_target_is_visible() {
         &state.endpoints,
         &state.active_endpoint_id,
         state.config.agent_panel_sort,
+        state
+            .config
+            .preferences
+            .customization
+            .include_terminal_shell_tasks,
     );
     let index = targets
         .iter()
@@ -1069,7 +1110,7 @@ fn saved_machine_preserves_endpoint_scoped_worktree_collapses() {
     state.open_workspace_context_menu("ws_1".into(), 0, 0);
     let toggle_index = match state.overlay.as_ref() {
         Some(ClientShellOverlay::ContextMenu(menu)) => menu
-            .items()
+            .items(true)
             .iter()
             .position(|item| item.action == ClientContextMenuAction::ToggleGroup)
             .expect("collapse menu item"),
@@ -2008,6 +2049,92 @@ fn unselected_endpoint_completion_projects_done_client_side() {
         .map(|agent| agent.agent_status);
     assert_eq!(status, Some(AgentStatus::Done));
     assert_eq!(state.active_endpoint_id, ClientEndpointId::Local);
+}
+
+#[test]
+fn completion_glow_pulses_visible_dots_and_stops_after_viewing() {
+    for collapsed in [false, true] {
+        let (mut state, endpoint_id) = state_with_remote();
+        state.sidebar_collapsed = collapsed;
+        let mut remote = snapshot();
+        remote.boot_id = "remote-boot".into();
+        remote.agents = vec![agent("background agent", AgentStatus::Working, 2)];
+        state.set_endpoint_snapshot(&endpoint_id, Box::new(remote.clone()));
+        state.compose(100, 28).expect("working frame");
+        assert!(state.completion_glow_deadline.is_none());
+
+        remote.revision = 2;
+        remote.agents = vec![agent("background agent", AgentStatus::Idle, 3)];
+        state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+        let bright = state.compose(100, 28).expect("completed frame");
+        let deadline = state
+            .completion_glow_deadline
+            .expect("visible completion animates");
+        assert!(!state.tick_completion_glow(deadline - std::time::Duration::from_millis(1)));
+        assert!(state.tick_completion_glow(deadline));
+        let dimmer = state.compose(100, 28).expect("pulse frame");
+        let changes = bright
+            .cells
+            .iter()
+            .zip(&dimmer.cells)
+            .filter(|(before, after)| before.fg != after.fg)
+            .collect::<Vec<_>>();
+        assert!(
+            !changes.is_empty(),
+            "completion dots must change brightness"
+        );
+        for (before, after) in changes {
+            assert_eq!(before.symbol, "●");
+            assert_eq!(after.symbol, "●");
+            assert_eq!(before.bg, after.bg);
+        }
+
+        // Exercise the same presentation acknowledgment used when a pane is viewed.
+        let endpoint = state
+            .endpoints
+            .iter_mut()
+            .find(|endpoint| endpoint.endpoint_id == endpoint_id)
+            .expect("remote");
+        let mut viewed = surface();
+        viewed.boot_id = "remote-boot".into();
+        viewed.projection_revision = 2;
+        assert!(endpoint.agent_presentation.acknowledge_surface(
+            endpoint.snapshot.as_mut().expect("snapshot"),
+            &viewed,
+            Some(true),
+        ));
+        state.compose(100, 28).expect("seen frame");
+        assert!(state.completion_glow_deadline.is_none());
+        assert!(!state.tick_completion_glow(deadline + std::time::Duration::from_secs(5)));
+    }
+}
+
+#[test]
+fn completion_glow_stops_for_symbols_hidden_sidebar_and_stale_endpoints() {
+    let (mut state, endpoint_id) = state_with_remote();
+    let mut remote = snapshot();
+    remote.boot_id = "remote-boot".into();
+    remote.agents = vec![agent("background agent", AgentStatus::Working, 2)];
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote.clone()));
+    remote.revision = 2;
+    remote.agents = vec![agent("background agent", AgentStatus::Idle, 3)];
+    state.set_endpoint_snapshot(&endpoint_id, Box::new(remote));
+    state.compose(100, 28).expect("completed frame");
+    assert!(state.completion_glow_deadline.is_some());
+
+    state.config.status_indicators = crate::config::StatusIndicatorStyle::Symbols;
+    state.compose(100, 28).expect("symbols frame");
+    assert!(state.completion_glow_deadline.is_none());
+    state.config.status_indicators = crate::config::StatusIndicatorStyle::Dots;
+    state.compose(100, 28).expect("dots frame");
+    assert!(state.completion_glow_deadline.is_some());
+    state
+        .compose(30, 28)
+        .expect("mobile frame without desktop sidebar");
+    assert!(state.completion_glow_deadline.is_none());
+    state.mark_endpoint_disconnected(&endpoint_id);
+    state.compose(100, 28).expect("stale frame");
+    assert!(state.completion_glow_deadline.is_none());
 }
 
 #[test]

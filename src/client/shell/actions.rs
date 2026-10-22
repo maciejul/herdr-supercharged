@@ -568,6 +568,51 @@ impl ClientShellState {
         }
         match pending.kind {
             PendingEndpointKind::Generic => {}
+            PendingEndpointKind::TabRenameWorkspace {
+                workspace_id,
+                label,
+            } => {
+                let mut outcome = ClientShellInput::default();
+                if matches!(&result, Ok(crate::api::schema::ResponseResult::TabInfo { tab }) if tab.workspace_id == workspace_id)
+                {
+                    self.push_endpoint_method(
+                        crate::api::schema::Method::WorkspaceRename(
+                            crate::api::schema::WorkspaceRenameParams {
+                                workspace_id,
+                                label,
+                            },
+                        ),
+                        &mut outcome,
+                    );
+                } else if result.is_ok() {
+                    self.set_endpoint_error(
+                        "Unexpected tab rename response; workspace name was not changed.",
+                    );
+                }
+                return (true, outcome.actions);
+            }
+            PendingEndpointKind::WorkspaceCreateInGroup {
+                endpoint,
+                group_name,
+            } => {
+                if let Ok(crate::api::schema::ResponseResult::WorkspaceCreated {
+                    workspace, ..
+                }) = result
+                {
+                    let mut outcome = ClientShellInput::default();
+                    self.assign_created_group_workspace(
+                        &endpoint,
+                        &group_name,
+                        workspace.workspace_id,
+                        &mut outcome,
+                    );
+                } else if result.is_ok() {
+                    self.set_endpoint_error(
+                        "Server returned an unexpected workspace creation result.",
+                    );
+                }
+                return (true, Vec::new());
+            }
             PendingEndpointKind::PaneLinkResolve { .. } => unreachable!("handled above"),
             PendingEndpointKind::ProductAnnouncementDismiss { version, id } => {
                 return match result {
@@ -831,7 +876,9 @@ impl ClientShellState {
                 };
                 return (repaint, Vec::new());
             }
-            kind @ (PendingEndpointKind::IntegrationList
+            kind @ (PendingEndpointKind::UnreadSuspendDelay
+            | PendingEndpointKind::BackgroundTracking
+            | PendingEndpointKind::IntegrationList
             | PendingEndpointKind::IntegrationInstall) => {
                 return self.handle_settings_endpoint_result(kind, result);
             }
@@ -891,19 +938,13 @@ impl ClientShellState {
 
         match action {
             KeybindAction::FocusAgent(index) => {
-                let agents = super::agent_sidebar::ordered_agent_pane_ids(
-                    snapshot,
-                    self.config.agent_panel_sort,
-                );
+                let agents = super::agent_sidebar::visible_agent_pane_ids(snapshot, &self.config);
                 Some(Method::PaneFocus(PaneTarget {
                     pane_id: agents.get(index)?.clone(),
                 }))
             }
             KeybindAction::PreviousAgent | KeybindAction::NextAgent => {
-                let agents = super::agent_sidebar::ordered_agent_pane_ids(
-                    snapshot,
-                    self.config.agent_panel_sort,
-                );
+                let agents = super::agent_sidebar::visible_agent_pane_ids(snapshot, &self.config);
                 if agents.is_empty() {
                     return None;
                 }

@@ -350,14 +350,109 @@ The title renders on the Herdr server, so `{hostname}` names the machine the pan
 
 `client.window_title.set` overrides the configured title until `client.window_title.clear` hands it back.
 
-Agent status uses compact colored dots by default. To distinguish blocked, working, done, idle, and unknown states by shape as well as color, choose **distinct symbols** in Settings or configure:
+Agent status uses compact colored dots by default. In this private customization,
+unseen completed tasks pulse green in the desktop sidebar (both workspace and
+agent rows, expanded or collapsed). Unread completed tab labels also pulse the
+same green; their glow pauses while a dialog covers the chrome. The pulse stops when the completion is viewed,
+the agent starts working again, or the dot is hidden. Disconnected machines remain
+dim. This is a client-side indicator of completion, not proof that the task succeeded.
+To distinguish blocked, working, done, idle, and unknown states by shape as well as color, choose **distinct symbols** in Settings or configure:
 
 ```toml
 [ui]
 status_indicators = "symbols"
 ```
 
-The symbols are static, so this option does not enable spinner animation.
+The symbols are static; unread tab-label glow remains available in either mode.
+
+In this private build, expanded agent lists include labeled divider lines for
+**working**, **unread**, **idle**, **needs input**, and **unknown** runs.
+The existing sort setting still controls row order; priority sorting keeps
+matching states together. Idle includes agents that have not started a
+task yet. Divider lines are not clickable agent rows.
+
+**Customization settings**
+
+**Automatic tab names** and **Automatic Space names** in **Settings → Customization** independently control whether Claude/Codex conversation metadata updates those display names. Both default to on. Turning either off immediately restores the server-provided name; manual names are always preserved. These choices are saved in local client preferences and do not change session suspension or resume behavior.
+
+Open **Settings → Customization** to enable or disable Space groups, show the
+selected tab's name beneath each Space, or use that tab name in place of the
+Space label. **Rename workspace when tab is renamed** also applies manual tab
+renames to the containing workspace, after the tab rename succeeds; it is off by
+default. **Agent status dividers** shows or hides the labeled lines between agent
+states and is on by default. Disabling groups preserves saved membership. Tab display options
+apply to the expanded desktop sidebar and do not rename the underlying Space.
+
+The same section offers color presets for working agents, subagents, background
+tasks, and unread completion dots. Defaults are orange, yellow, blue, and darker
+saturated green respectively. Settings are saved immediately; **Reset defaults**
+restores these presentation options without deleting groups or changing integration
+hooks.
+
+**Subagent/background-task tracking** shows the current machine's integration
+state. Changing it opens a confirmation explaining that it adds or removes the
+activity hooks in installed Claude/Codex integrations, affecting all Herdr sessions
+on that machine. Session-resume and unrelated hooks are preserved. Disabling also
+stops existing activity monitors; reinstallation respects the disabled choice.
+If the endpoint does not support this setting, or neither integration is installed,
+the option is unavailable. Restart agent sessions to load changed hook registrations;
+Codex may require reviewing them in `/hooks`.
+
+**Background activity**
+
+Running activity appears beneath its parent agent and its Space. Click the nested
+count to expand individual entries. Agent-launched shell commands and ordinary
+terminal panes actively executing a command are included; idle shell prompts are
+excluded. A Space with activity uses blue when its main agent would otherwise
+appear idle, unknown, or completed. Working orange and blocked red retain priority.
+Customization settings control activity under Spaces, activity under Agents,
+agent shell tasks, ordinary terminal tasks, and the workspace activity highlight
+and its color separately. Subagents take priority in the summary; when
+there are none, it shows the count of running tasks. The expanded list includes
+both kinds of work, using their separate colors. Scroll an expanded list with the
+mouse wheel when it exceeds the sidebar height.
+
+On Linux/macOS, install or update the Claude/Codex integration to enable activity
+reports. Subagent start/stop hooks track their lifetime. Claude background command
+completion notifications clear finished commands even while the parent is idle;
+Codex command entries clear when its tool reports their exit. Foreground agent
+shell calls are tracked from tool start until completion, failure, or interruption,
+and become a single background entry if the tool yields a background task. Codex may require
+reviewing new hooks in `/hooks`; restart existing agent sessions after installing.
+The collector publishes up to 64 running entries, and activity expires if its
+heartbeat stops. Windows does not yet install this activity companion.
+
+**Personal Space groups**
+
+When Local is the only machine, Spaces and groups are shown directly without a
+machine heading. Machine headings appear when additional machines are configured.
+
+Click **+ group** in the desktop Spaces header to create a named group. Right-click
+a Space and choose **Move to group...**. Use Up/Down and Enter to choose an existing
+group, or type a new group name. You can also drag a Space onto a group header to
+assign it to that group on the same machine.
+Multiple Spaces can belong to a group; each Space belongs to at most one group.
+Submit a blank group name to move a Space back to ungrouped.
+
+Click a group header to collapse or expand it. The active Space stays visible.
+Right-click a group and choose **New workspace** to create a Space in that group.
+The group expands and membership is saved once creation succeeds. The usual
+workspace-name prompt still applies when enabled. For a group on another machine,
+select a Space on that machine first.
+Right-click the header to rename the group or **Ungroup spaces**; ungrouping keeps
+every Space and its running processes. Group names, membership, and collapsed
+state are saved for this client/session, separately for each machine. Groups are
+shown in the expanded desktop sidebar; the compact sidebar and mobile views keep
+their flat workspace lists. While named groups exist, use the membership menu
+to assign membership or drag a Space onto a group header. Flat list reordering
+remains available when groups are disabled or absent.
+
+**Automatic conversation names**
+
+Unnamed tabs follow the title reported by their Claude or Codex agent. In a split
+tab, the focused named agent takes precedence. A Space containing one agent also
+uses that agent's conversation title. Manually assigned Space/tab names are kept.
+If an agent provides no usable title or name, Herdr keeps its existing label.
 
 ### Sidebar row layouts
 
@@ -561,6 +656,14 @@ startup_per_agent_delay_ms = 100
 Automatic restores start one agent at a time, 100 milliseconds apart by default, to reduce startup contention. The first eligible agent starts immediately. Set `startup_per_agent_delay_ms = 0` to disable spacing. Manual launches and explicit terminal attaches are unaffected. Restart the Herdr server to apply changes.
 
 Only panes with a valid native session reference from an official integration can resume; other panes restore as normal shells. See [Session state and restore](/docs/session-state/) for supported Agents and persistence behavior.
+
+### Unread session suspension
+
+In **Settings → customization → Suspend unread tabs after**, press Enter/apply to cycle through **Immediate, 1h, 4h, 8h, 24h (default), and 48h**. When that delay expires after an unread completion, Herdr closes the tab’s idle Claude/Codex processes and adds `(Suspended)` to its title. Opening the tab resumes the saved conversations and removes the suffix. Delayed checks run once per minute; Immediate runs on the next maintenance check, normally within one second.
+
+The endpoint server saves this setting in its local state directory (`unread-suspension.json`) and applies changes immediately. Other running named sessions on the same machine pick up the saved value after configuration reload or restart. Older servers show the option as unavailable. Resetting client customization does not reset this server setting.
+
+Suspension requires an exact saved session identity. Tabs with working or blocked agents, reported background tasks, or agents without a supported resume identity stay running. Shell-only panes remain open. Suspended tabs survive server restarts when agent session restore is enabled; the unread countdown for running sessions starts again after a new unread completion.
 
 ## IME cursor tracking
 

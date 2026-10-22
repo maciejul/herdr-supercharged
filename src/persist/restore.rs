@@ -620,7 +620,10 @@ fn restore_tab(
                     std::time::Instant::now(),
                 );
             }
-            panes.insert(*id, PaneState::new(terminal_id));
+            let mut pane = PaneState::new(terminal_id);
+            pane.suspended = saved_pane.is_some_and(|saved| saved.suspended);
+            pane.seen = !pane.suspended;
+            panes.insert(*id, pane);
             terminals.push(terminal);
             continue;
         }
@@ -1542,6 +1545,7 @@ mod tests {
                     panes: HashMap::from([(
                         0,
                         super::super::snapshot::PaneSnapshot {
+                            suspended: false,
                             cwd,
                             label: Some("reviewer".into()),
                             agent_name: Some("reviewer".into()),
@@ -1629,6 +1633,7 @@ mod tests {
                         (
                             10,
                             super::super::snapshot::PaneSnapshot {
+                                suspended: false,
                                 cwd: cwd.clone(),
                                 label: None,
                                 agent_name: None,
@@ -1641,6 +1646,7 @@ mod tests {
                         (
                             20,
                             super::super::snapshot::PaneSnapshot {
+                                suspended: false,
                                 cwd: cwd.clone(),
                                 label: None,
                                 agent_name: None,
@@ -1695,6 +1701,7 @@ mod tests {
             (
                 id.parse::<u32>().unwrap(),
                 super::super::snapshot::PaneSnapshot {
+                    suspended: false,
                     cwd: cwd.clone(),
                     label: None,
                     agent_name: None,
@@ -1706,6 +1713,7 @@ mod tests {
             )
         };
         let final_pane = super::super::snapshot::PaneSnapshot {
+            suspended: false,
             cwd: cwd.clone(),
             label: Some("planner".into()),
             agent_name: Some("planner".into()),
@@ -1858,6 +1866,7 @@ mod tests {
                     panes: HashMap::from([(
                         0,
                         super::super::snapshot::PaneSnapshot {
+                            suspended: false,
                             cwd,
                             label: None,
                             agent_name: None,
@@ -2169,6 +2178,7 @@ mod tests {
         panes.insert(
             0,
             super::super::snapshot::PaneSnapshot {
+                suspended: false,
                 cwd: cwd.clone(),
                 label: None,
                 agent_name: None,

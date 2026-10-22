@@ -1,4 +1,11 @@
 mod actions;
+#[cfg(unix)]
+mod background_hooks;
+#[cfg(unix)]
+pub(crate) use background_hooks::{
+    set_tracking_enabled as set_background_tracking_enabled,
+    tracking_enabled as background_tracking_enabled,
+};
 mod claude_settings;
 mod command;
 mod config_edit;
@@ -49,7 +56,7 @@ const CLAUDE_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/claude/herdr-agent-state.sh")
 };
-const CLAUDE_INTEGRATION_VERSION: u32 = 11;
+const CLAUDE_INTEGRATION_VERSION: u32 = if cfg!(unix) { 12 } else { 11 };
 const CODEX_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
     "herdr-agent-state.ps1"
 } else {
@@ -60,7 +67,7 @@ const CODEX_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/codex/herdr-agent-state.sh")
 };
-const CODEX_INTEGRATION_VERSION: u32 = 10;
+const CODEX_INTEGRATION_VERSION: u32 = if cfg!(unix) { 11 } else { 10 };
 const KIMI_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
     "herdr-agent-state.ps1"
 } else {

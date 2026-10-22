@@ -1204,6 +1204,18 @@ impl ClientShellState {
                     outcome.repaint = true;
                     return;
                 }
+                Some(ClientChromeDrag::SpaceGroup { endpoint_id, .. }) => {
+                    let endpoint = endpoint_id.clone();
+                    let target = self.space_group_drop_target_at(&endpoint, point);
+                    if let Some(ClientChromeDrag::SpaceGroup {
+                        target: current, ..
+                    }) = self.chrome_drag.as_mut()
+                    {
+                        *current = target;
+                    }
+                    outcome.repaint = true;
+                    return;
+                }
                 Some(ClientChromeDrag::Workspace { .. }) => {
                     let target = self.workspace_drop_target_at(point);
                     if let Some(ClientChromeDrag::Workspace {
@@ -1223,6 +1235,22 @@ impl ClientShellState {
                     .abs_diff(press.start_column)
                     .max(mouse.row.abs_diff(press.start_row));
                 if delta >= 1 {
+                    if self.config.preferences.customization.space_groups_enabled
+                        && self.config.preferences.space_groups.iter().any(|group| {
+                            group.endpoint == super::space_groups::endpoint_key(&press.endpoint_id)
+                        })
+                    {
+                        let endpoint_id = press.endpoint_id.clone();
+                        let workspace_id = press.workspace_id.clone();
+                        let target = self.space_group_drop_target_at(&endpoint_id, point);
+                        self.chrome_drag = Some(ClientChromeDrag::SpaceGroup {
+                            endpoint_id,
+                            workspace_id,
+                            target,
+                        });
+                        outcome.repaint = true;
+                        return;
+                    }
                     let source_workspace_id = press.workspace_id.clone();
                     let draggable = self.endpoint_workspace_is_draggable(press);
                     if draggable {
@@ -1288,6 +1316,21 @@ impl ClientShellState {
                                         insert_index: insert_index.unwrap_or_default(),
                                     },
                                 ),
+                                outcome,
+                            );
+                        }
+                        outcome.repaint = true;
+                    }
+                    ClientChromeDrag::SpaceGroup {
+                        endpoint_id,
+                        workspace_id,
+                        ..
+                    } => {
+                        if let Some(index) = self.space_group_drop_target_at(&endpoint_id, point) {
+                            self.assign_workspace_to_group(
+                                &endpoint_id,
+                                &workspace_id,
+                                index,
                                 outcome,
                             );
                         }
@@ -1778,6 +1821,14 @@ impl ClientShellState {
             return;
         }
         if self.scroll_in_progress_selection(mouse, outcome) {
+            return;
+        }
+
+        if self.handle_background_activity_mouse(mouse, outcome) {
+            return;
+        }
+
+        if self.handle_space_group_mouse(mouse, outcome) {
             return;
         }
 

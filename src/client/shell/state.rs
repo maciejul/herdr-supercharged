@@ -83,6 +83,8 @@ pub(super) enum ClientMobileTarget {
 
 #[derive(Default)]
 pub(super) struct ShellHitMap {
+    pub(super) new_space_group: Rect,
+    pub(super) space_groups: Vec<(Rect, usize)>,
     pub(super) machines: Vec<MachineHit>,
     pub(super) workspaces: Vec<WorkspaceHit>,
     pub(super) workspace_body: Rect,
@@ -95,6 +97,8 @@ pub(super) struct ShellHitMap {
     pub(super) pane_splits: Vec<PaneSplitHit>,
     pub(super) agents: Vec<(Rect, String)>,
     pub(super) endpoint_agents: Vec<(Rect, ClientEndpointId, String)>,
+    pub(super) background_activity: Vec<(Rect, ClientEndpointId, String)>,
+    pub(super) background_activity_scroll: Vec<(Rect, ClientEndpointId, String, usize)>,
     pub(super) agent_body: Rect,
     pub(super) agent_scrollbar: Rect,
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
@@ -212,6 +216,11 @@ pub(super) enum ClientChromeDrag {
         workspace_id: String,
         insert_index: Option<usize>,
     },
+    SpaceGroup {
+        endpoint_id: ClientEndpointId,
+        workspace_id: String,
+        target: Option<usize>,
+    },
     Workspace {
         source_workspace_id: String,
         target: Option<(Option<String>, u16)>,
@@ -295,10 +304,17 @@ pub(super) enum ClientShellOverlayKind {
 
 #[derive(Debug)]
 pub(super) enum ClientRenameTarget {
+    SpaceGroup {
+        workspace_id: Option<String>,
+        group_index: Option<usize>,
+        endpoint: String,
+        choices: Vec<String>,
+    },
     NewWorkspace {
         source_workspace_id: Option<String>,
         cwd: Option<String>,
         suggested_name: String,
+        space_group: Option<(String, String)>,
     },
     Workspace {
         workspace_id: String,
@@ -388,6 +404,7 @@ pub(super) enum ClientSettingsSection {
     Sound,
     Toast,
     Integrations,
+    Customization,
 }
 
 impl ClientSettingsSection {
@@ -397,6 +414,7 @@ impl ClientSettingsSection {
         Self::Sound,
         Self::Toast,
         Self::Integrations,
+        Self::Customization,
     ];
 
     pub(super) fn label(self) -> &'static str {
@@ -406,12 +424,17 @@ impl ClientSettingsSection {
             Self::Sound => "sound",
             Self::Toast => "toasts",
             Self::Integrations => "integrations",
+            Self::Customization => "customization",
         }
     }
 }
 
 #[derive(Debug)]
 pub(super) struct ClientSettingsOverlay {
+    pub(super) customization: preferences::CustomizationPreferences,
+    pub(super) tracking_confirmation: Option<(bool, ClientEndpointId)>,
+    pub(super) tracking_pending: bool,
+    pub(super) tracking_message: Option<String>,
     pub(super) section: ClientSettingsSection,
     pub(super) selected: usize,
     pub(super) original_theme_name: String,
@@ -510,6 +533,9 @@ pub(super) struct ClientWorktreeRemoveOverlay {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ClientContextMenuAction {
+    NewWorkspaceInGroup,
+    MoveToSpaceGroup,
+    RemoveSpaceGroup,
     Rename,
     Close,
     NewWorktree,
@@ -529,6 +555,9 @@ pub(super) enum ClientContextMenuAction {
 
 #[derive(Debug)]
 pub(super) enum ClientContextMenuTarget {
+    SpaceGroup {
+        index: usize,
+    },
     Workspace {
         workspace_id: String,
         is_git: bool,
@@ -618,6 +647,14 @@ impl ClientShellOverlay {
 
 #[derive(Debug)]
 pub(super) enum PendingEndpointKind {
+    TabRenameWorkspace {
+        workspace_id: String,
+        label: String,
+    },
+    WorkspaceCreateInGroup {
+        endpoint: String,
+        group_name: String,
+    },
     Generic,
     ProductAnnouncementDismiss {
         version: String,
@@ -626,6 +663,8 @@ pub(super) enum PendingEndpointKind {
     ReleaseNotesDismiss,
     PopupCommand,
     ReloadConfig,
+    BackgroundTracking,
+    UnreadSuspendDelay,
     IntegrationList,
     IntegrationInstall,
     PrepareWorktreeCreate {
@@ -884,6 +923,8 @@ pub(crate) struct ClientShellState {
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
+    pub(super) expanded_background_activity: HashSet<(ClientEndpointId, String)>,
+    pub(super) background_activity_offsets: HashMap<(ClientEndpointId, String), usize>,
     pub(super) pending_agent_reveal: Option<(ClientEndpointId, String)>,
     pub(super) tab_scroll: usize,
     pub(super) mobile_switcher_scroll: usize,
@@ -895,6 +936,8 @@ pub(crate) struct ClientShellState {
     pub(super) last_composed_size: Option<(u16, u16)>,
     pub(super) last_composed_at: Option<std::time::Instant>,
     pub(super) selection_repaint_deadline: Option<std::time::Instant>,
+    pub(super) completion_glow_deadline: Option<std::time::Instant>,
+    pub(super) completion_glow_step: u8,
     pub(super) hits: ShellHitMap,
     pub(super) endpoints: Vec<ClientShellEndpoint>,
     pub(super) active_endpoint_id: ClientEndpointId,
@@ -1058,6 +1101,8 @@ impl ClientShellState {
             remote_collapsed_groups,
             workspace_scroll: 0,
             agent_scroll: 0,
+            expanded_background_activity: HashSet::new(),
+            background_activity_offsets: HashMap::new(),
             pending_agent_reveal: None,
             tab_scroll: 0,
             mobile_switcher_scroll: 0,
@@ -1069,6 +1114,8 @@ impl ClientShellState {
             last_composed_size: None,
             last_composed_at: None,
             selection_repaint_deadline: None,
+            completion_glow_deadline: None,
+            completion_glow_step: 0,
             hits: ShellHitMap::default(),
             endpoints: vec![local_endpoint()],
             active_endpoint_id: ClientEndpointId::Local,
@@ -1191,11 +1238,27 @@ impl ClientShellState {
         if self.mobile_layout_active() {
             render::workspace_entries(snapshot, &empty_collapsed_groups)
         } else {
-            render::workspace_entries(
+            let entries = render::workspace_entries(
                 snapshot,
                 self.collapsed_groups_for_endpoint(&self.active_endpoint_id)
                     .unwrap_or(&empty_collapsed_groups),
+            );
+            if self.sidebar_collapsed || !self.config.preferences.customization.space_groups_enabled
+            {
+                return entries;
+            }
+            super::space_groups::grouped_rows(
+                snapshot,
+                entries,
+                &self.active_endpoint_id,
+                &self.config.preferences.space_groups,
             )
+            .into_iter()
+            .filter_map(|row| match row {
+                super::space_groups::GroupedSpaceRow::Workspace(entry) => Some(entry),
+                _ => None,
+            })
+            .collect()
         }
     }
 
@@ -1883,6 +1946,7 @@ impl ClientShellState {
         self.selection_autoscroll_deadline
             .into_iter()
             .chain(self.selection_repaint_deadline)
+            .chain(self.completion_glow_deadline)
             .min()
             .map(|deadline| deadline.saturating_duration_since(now).min(default))
             .unwrap_or(default)

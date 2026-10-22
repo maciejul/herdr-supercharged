@@ -98,6 +98,8 @@ pub struct TabSnapshot {
 
 #[derive(Serialize, Deserialize)]
 pub struct PaneSnapshot {
+    #[serde(default)]
+    pub suspended: bool,
     pub cwd: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -381,6 +383,7 @@ fn capture_tab(
         panes.insert(
             id.raw(),
             PaneSnapshot {
+                suspended: tab.panes.get(id).is_some_and(|pane| pane.suspended),
                 cwd,
                 label,
                 agent_name,
@@ -700,6 +703,7 @@ mod tests {
         panes.insert(
             0,
             PaneSnapshot {
+                suspended: false,
                 cwd: PathBuf::from("/home/can/Projects/herdr"),
                 label: None,
                 agent_name: None,
@@ -712,6 +716,7 @@ mod tests {
         panes.insert(
             1,
             PaneSnapshot {
+                suspended: false,
                 cwd: PathBuf::from("/home/can/Projects/website"),
                 label: Some("website".into()),
                 agent_name: None,
@@ -1398,6 +1403,7 @@ mod tests {
         panes.insert(
             0,
             PaneSnapshot {
+                suspended: false,
                 cwd: PathBuf::from("/tmp/this-directory-does-not-exist-for-herdr-test"),
                 label: None,
                 agent_name: None,
@@ -1410,6 +1416,7 @@ mod tests {
         panes.insert(
             1,
             PaneSnapshot {
+                suspended: false,
                 cwd: std::env::var("HOME")
                     .map(PathBuf::from)
                     .unwrap_or_else(|_| PathBuf::from("/tmp")),

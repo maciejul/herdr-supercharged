@@ -332,6 +332,10 @@ impl ClientShellState {
 
     pub(super) fn open_new_workspace_overlay(&mut self) {
         let source_workspace_id = self.workspace_action_id();
+        self.open_new_workspace_overlay_from(source_workspace_id);
+    }
+
+    pub(super) fn open_new_workspace_overlay_from(&mut self, source_workspace_id: Option<String>) {
         let cwd = self.snapshot.as_deref().and_then(|snapshot| {
             let workspace_id = source_workspace_id.as_deref()?;
             snapshot
@@ -352,6 +356,7 @@ impl ClientShellState {
                 source_workspace_id,
                 cwd,
                 suggested_name,
+                space_group: None,
             },
         }));
     }
@@ -898,6 +903,23 @@ impl ClientShellState {
         let Some(ClientShellOverlay::Rename(rename)) = self.overlay.as_mut() else {
             return;
         };
+        if matches!(key.code, KeyCode::Up | KeyCode::Down) {
+            if let ClientRenameTarget::SpaceGroup { choices, .. } = &rename.target {
+                if !choices.is_empty() {
+                    let selected = choices.iter().position(|name| name == rename.input.trim());
+                    let next = if key.code == KeyCode::Down {
+                        selected.map_or(0, |index| (index + 1) % choices.len())
+                    } else {
+                        selected.map_or(choices.len() - 1, |index| {
+                            (index + choices.len() - 1) % choices.len()
+                        })
+                    };
+                    rename.input = TextEditor::new(&choices[next], false);
+                    outcome.repaint = true;
+                    return;
+                }
+            }
+        }
         if key.code == KeyCode::Enter {
             self.save_rename_overlay(outcome);
             return;
@@ -936,20 +958,45 @@ impl ClientShellState {
         };
         let trimmed = rename.input.trim();
         let method = match rename.target {
+            ClientRenameTarget::SpaceGroup {
+                workspace_id,
+                group_index,
+                endpoint,
+                ..
+            } => {
+                if endpoint != super::space_groups::endpoint_key(&self.active_endpoint_id) {
+                    self.set_endpoint_error(
+                        "The active machine changed. Open Move to group again.",
+                    );
+                    outcome.repaint = true;
+                    return;
+                }
+                self.save_space_group(workspace_id, group_index, trimmed, outcome);
+                None
+            }
             ClientRenameTarget::NewWorkspace {
                 source_workspace_id,
                 cwd,
                 suggested_name,
-            } => Some(crate::api::schema::Method::WorkspaceCreate(
-                crate::api::schema::WorkspaceCreateParams {
-                    source_workspace_id,
-                    cwd,
-                    focus: true,
-                    label: (!trimmed.is_empty() && trimmed != suggested_name)
-                        .then(|| trimmed.to_owned()),
-                    env: Default::default(),
-                },
-            )),
+                space_group,
+            } => {
+                let method = crate::api::schema::Method::WorkspaceCreate(
+                    crate::api::schema::WorkspaceCreateParams {
+                        source_workspace_id,
+                        cwd,
+                        focus: true,
+                        label: (!trimmed.is_empty() && trimmed != suggested_name)
+                            .then(|| trimmed.to_owned()),
+                        env: Default::default(),
+                    },
+                );
+                if let Some((endpoint, group_name)) = space_group {
+                    self.submit_group_workspace(endpoint, group_name, method, outcome);
+                    None
+                } else {
+                    Some(method)
+                }
+            }
             ClientRenameTarget::Workspace { workspace_id } => (!trimmed.is_empty()).then(|| {
                 crate::api::schema::Method::WorkspaceRename(
                     crate::api::schema::WorkspaceRenameParams {
@@ -989,7 +1036,36 @@ impl ClientShellState {
             )),
         };
         if let Some(method) = method {
-            self.push_endpoint_method(method, outcome);
+            let workspace_rename = match &method {
+                crate::api::schema::Method::TabRename(params)
+                    if self
+                        .config
+                        .preferences
+                        .customization
+                        .rename_workspace_with_tab =>
+                {
+                    self.snapshot
+                        .as_deref()
+                        .and_then(|snapshot| {
+                            snapshot.tabs.iter().find(|tab| tab.tab_id == params.tab_id)
+                        })
+                        .map(|tab| (tab.workspace_id.clone(), params.label.clone()))
+                }
+                _ => None,
+            };
+            if let Some((workspace_id, label)) = workspace_rename {
+                // Apply the workspace change only after the tab rename succeeds.
+                self.push_endpoint_method_with_kind(
+                    method,
+                    PendingEndpointKind::TabRenameWorkspace {
+                        workspace_id,
+                        label,
+                    },
+                    outcome,
+                );
+            } else {
+                self.push_endpoint_method(method, outcome);
+            }
         }
         outcome.repaint = true;
     }

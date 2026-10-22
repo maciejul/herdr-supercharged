@@ -14,6 +14,7 @@ pub(crate) struct ClientShellEndpoint {
     pub(crate) label: String,
     pub(crate) status: ClientEndpointStatus,
     pub(crate) snapshot: Option<Box<ClientShellSnapshot>>,
+    original_names: super::automatic_names::OriginalNames,
     /// Connection generation that produced `snapshot`. `None` is reserved for local tests.
     pub(crate) snapshot_generation: Option<u64>,
     pub(crate) agent_recency: HashMap<String, u64>,
@@ -44,6 +45,17 @@ pub(crate) enum ClientEndpointFocusTarget {
 }
 
 impl ClientShellState {
+    pub(super) fn refresh_automatic_names(&mut self) {
+        for endpoint in &mut self.endpoints {
+            if let Some(snapshot) = endpoint.snapshot.as_deref_mut() {
+                endpoint.original_names.restore(snapshot);
+                super::automatic_names::apply(snapshot, &self.config.preferences.customization);
+            }
+        }
+        let active = self.active_endpoint_id.clone();
+        self.apply_cached_endpoint_snapshot(&active);
+    }
+
     pub(crate) fn set_endpoint_catalog(&mut self, profiles: &[SavedSshEndpoint]) {
         let mut next = Vec::with_capacity(profiles.len().saturating_add(1));
         let local = self
@@ -74,6 +86,9 @@ impl ClientShellState {
                     |endpoint| endpoint.status,
                 ),
                 snapshot: previous.and_then(|endpoint| endpoint.snapshot.clone()),
+                original_names: previous
+                    .map(|endpoint| endpoint.original_names.clone())
+                    .unwrap_or_default(),
                 snapshot_generation: previous.and_then(|endpoint| endpoint.snapshot_generation),
                 agent_recency: previous
                     .map(|endpoint| endpoint.agent_recency.clone())
@@ -567,6 +582,9 @@ impl ClientShellState {
         {
             return;
         }
+        self.endpoints[index].original_names =
+            super::automatic_names::OriginalNames::capture(&snapshot);
+        super::automatic_names::apply(&mut snapshot, &self.config.preferences.customization);
         let boot_changed = self.endpoints[index]
             .snapshot
             .as_deref()
@@ -735,6 +753,7 @@ pub(super) fn local_endpoint() -> ClientShellEndpoint {
         label: "Local".into(),
         status: ClientEndpointStatus::Online,
         snapshot: None,
+        original_names: Default::default(),
         snapshot_generation: None,
         agent_recency: HashMap::new(),
         agent_presentation: Default::default(),

@@ -1,11 +1,16 @@
 use super::*;
 
 impl ClientContextMenuOverlay {
-    pub(super) fn items(&self) -> Vec<ClientContextMenuItem> {
+    pub(super) fn items(&self, groups_enabled: bool) -> Vec<ClientContextMenuItem> {
         use ClientContextMenuAction as Action;
 
         let item = |label, action| ClientContextMenuItem { label, action };
-        match &self.target {
+        let mut items = match &self.target {
+            ClientContextMenuTarget::SpaceGroup { .. } => vec![
+                item("Rename group", Action::Rename),
+                item("Ungroup spaces", Action::RemoveSpaceGroup),
+                item("New workspace", Action::NewWorkspaceInGroup),
+            ],
             ClientContextMenuTarget::Workspace { is_git: false, .. } => {
                 vec![item("Rename", Action::Rename), item("Close", Action::Close)]
             }
@@ -79,7 +84,11 @@ impl ClientContextMenuOverlay {
                 ]);
                 items
             }
+        };
+        if groups_enabled && matches!(self.target, ClientContextMenuTarget::Workspace { .. }) {
+            items.push(item("Move to group...", Action::MoveToSpaceGroup));
         }
+        items
     }
 }
 
@@ -171,7 +180,9 @@ impl ClientShellState {
         let Some(ClientShellOverlay::ContextMenu(menu)) = self.overlay.as_mut() else {
             return;
         };
-        let item_count = menu.items().len();
+        let item_count = menu
+            .items(self.config.preferences.customization.space_groups_enabled)
+            .len();
         if item_count == 0 {
             return;
         }
@@ -187,11 +198,28 @@ impl ClientShellState {
         let Some(ClientShellOverlay::ContextMenu(menu)) = self.overlay.take() else {
             return;
         };
-        let Some(action) = menu.items().get(index).map(|item| item.action) else {
+        let Some(action) = menu
+            .items(self.config.preferences.customization.space_groups_enabled)
+            .get(index)
+            .map(|item| item.action)
+        else {
             outcome.repaint = true;
             return;
         };
         match menu.target {
+            ClientContextMenuTarget::SpaceGroup { index } => match action {
+                ClientContextMenuAction::NewWorkspaceInGroup => {
+                    self.new_workspace_in_group(index, outcome)
+                }
+                ClientContextMenuAction::Rename => self.open_space_group_editor(None, Some(index)),
+                ClientContextMenuAction::RemoveSpaceGroup
+                    if index < self.config.preferences.space_groups.len() =>
+                {
+                    self.config.preferences.space_groups.remove(index);
+                    self.persist_chrome_preferences(outcome);
+                }
+                _ => {}
+            },
             ClientContextMenuTarget::Workspace {
                 workspace_id,
                 close_group,
@@ -229,6 +257,9 @@ impl ClientShellState {
         use crate::input::KeybindAction;
 
         match action {
+            ClientContextMenuAction::MoveToSpaceGroup => {
+                self.open_space_group_editor(Some(workspace_id), None);
+            }
             ClientContextMenuAction::Rename => {
                 let label = self
                     .snapshot

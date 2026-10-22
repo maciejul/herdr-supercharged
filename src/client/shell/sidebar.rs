@@ -99,7 +99,15 @@ pub(crate) fn render_collapsed_sidebar(
             rect.y,
             rect.width.saturating_sub(2),
             status_icon(status, config.status_indicators),
-            Style::default().fg(status_color(status, palette)),
+            workspace_activity_icon_style(
+                status,
+                &super::super::background_activity::BackgroundActivity::for_workspace(
+                    snapshot,
+                    &workspace.workspace_id,
+                    config,
+                ),
+                config,
+            ),
         );
         hits.workspaces.push(WorkspaceHit {
             rect,
@@ -129,6 +137,16 @@ pub(crate) fn render_collapsed_sidebar(
     );
     for (index, pane_id) in super::ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
         .into_iter()
+        .filter(|pane_id| {
+            config
+                .preferences
+                .customization
+                .include_terminal_shell_tasks
+                || !snapshot.agents.iter().any(|agent| {
+                    agent.pane_id == *pane_id
+                        && super::super::background_activity::activity_only(&agent.tokens)
+                })
+        })
         .take(detail_content.height as usize)
         .enumerate()
     {
@@ -166,7 +184,7 @@ pub(crate) fn render_collapsed_sidebar(
             rect.y,
             rect.width.saturating_sub(2),
             status_icon(agent.agent_status, config.status_indicators),
-            Style::default().fg(status_color(agent.agent_status, palette)),
+            super::super::background_activity::agent_icon_style(agent, config),
         );
         hits.agents.push((rect, pane_id));
     }
@@ -226,6 +244,7 @@ pub(crate) fn render_sidebar(
             .add_modifier(Modifier::BOLD),
     );
 
+    super::super::space_groups::render_create_button(buffer, workspace_area, config, hits);
     let entries = workspace_entries(snapshot, state.collapsed_groups);
     let body = Rect::new(
         workspace_area.x,
@@ -236,6 +255,17 @@ pub(crate) fn render_sidebar(
             .saturating_sub(WORKSPACE_HEADER_ROWS + 1),
     );
     hits.workspace_body = body;
+    let activities = snapshot
+        .workspaces
+        .iter()
+        .map(|workspace| {
+            super::super::background_activity::BackgroundActivity::for_workspace(
+                snapshot,
+                &workspace.workspace_id,
+                config,
+            )
+        })
+        .collect::<Vec<_>>();
     let row_heights = entries
         .iter()
         .map(|entry| {
@@ -243,14 +273,23 @@ pub(crate) fn render_sidebar(
                 .workspaces
                 .get(entry.index)
                 .map(|workspace| {
-                    workspace_rows(
+                    customized_workspace_rows(
+                        snapshot,
                         workspace,
                         displayed_workspace_status(snapshot, workspace, state.collapsed_groups),
                         entry.indented,
-                        &config.spaces,
+                        config,
                     )
                     .len()
                     .max(1)
+                    .saturating_add(workspace_activity_lines(
+                        &activities[entry.index],
+                        state.expanded_background_activity.contains(&(
+                            state.active_endpoint_id.clone(),
+                            workspace_activity_key(&workspace.workspace_id),
+                        )),
+                        config,
+                    ))
                     .min(u16::MAX as usize) as u16
                 })
                 .unwrap_or(1)
@@ -304,8 +343,9 @@ pub(crate) fn render_sidebar(
             continue;
         };
         let status = displayed_workspace_status(snapshot, workspace, state.collapsed_groups);
-        let rows = workspace_rows(workspace, status, entry.indented, &config.spaces);
-        let row_height = (rows.len().max(1).min(u16::MAX as usize) as u16).min(body.height);
+        let rows = customized_workspace_rows(snapshot, workspace, status, entry.indented, config);
+        let row_height = row_heights[entry_position].min(body.height);
+        let parent_height = (rows.len().max(1) as u16).min(row_height);
         if y.saturating_add(row_height) > body.bottom() {
             break;
         }
@@ -321,29 +361,45 @@ pub(crate) fn render_sidebar(
         } else if workspace.focused {
             buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
         }
+        let parent = Rect::new(rect.x, rect.y, rect.width, parent_height);
         render_workspace_rows(
             buffer,
-            rect,
+            parent,
             status,
-            config.status_indicators,
+            config,
             entry,
+            &activities[entry.index],
             rows,
             workspace.focused,
             selected,
             state.selected_workspace_id.is_some(),
             dragged,
-            palette,
+        );
+        render_workspace_activity(
+            buffer,
+            Rect::new(
+                rect.x,
+                rect.y + parent_height,
+                rect.width,
+                rect.height.saturating_sub(parent_height),
+            ),
+            &activities[entry.index],
+            &workspace.workspace_id,
+            state.active_endpoint_id,
+            state,
+            config,
+            hits,
         );
         let group_toggle = render_parent_group_toggle(
             buffer,
-            rect,
+            parent,
             snapshot,
             entry.index,
             state.collapsed_groups,
             palette,
         );
         hits.workspaces.push(WorkspaceHit {
-            rect,
+            rect: parent,
             endpoint_id: ClientEndpointId::Local,
             workspace_id: workspace.workspace_id.clone(),
             indented: entry.indented,
@@ -436,6 +492,8 @@ pub(crate) fn render_sidebar(
         snapshot,
         config,
         state.agent_scroll,
+        state.expanded_background_activity,
+        state.background_activity_offsets,
         hits,
     );
 
@@ -660,6 +718,126 @@ pub(in crate::client::shell) fn displayed_workspace_status(
         .unwrap_or(workspace.agent_status)
 }
 
+pub(in crate::client::shell) fn workspace_activity_lines(
+    activity: &super::super::background_activity::BackgroundActivity,
+    expanded: bool,
+    config: &ClientShellConfig,
+) -> usize {
+    if config.preferences.customization.show_workspace_activity {
+        activity.lines(expanded)
+    } else {
+        0
+    }
+}
+
+pub(in crate::client::shell) fn workspace_activity_icon_style(
+    status: crate::api::schema::AgentStatus,
+    activity: &super::super::background_activity::BackgroundActivity,
+    config: &ClientShellConfig,
+) -> Style {
+    if config
+        .preferences
+        .customization
+        .highlight_workspace_activity
+        && !activity.items.is_empty()
+        && !matches!(
+            status,
+            crate::api::schema::AgentStatus::Working | crate::api::schema::AgentStatus::Blocked
+        )
+    {
+        Style::default().fg(config
+            .preferences
+            .customization
+            .colors
+            .workspace_activity
+            .color())
+    } else {
+        config.status_icon_style(status)
+    }
+}
+
+pub(in crate::client::shell) fn workspace_activity_key(workspace_id: &str) -> String {
+    format!("workspace:{workspace_id}")
+}
+
+pub(in crate::client::shell) fn render_workspace_activity(
+    buffer: &mut Buffer,
+    rect: Rect,
+    activity: &super::super::background_activity::BackgroundActivity,
+    workspace_id: &str,
+    endpoint: &ClientEndpointId,
+    state: &ShellRenderState<'_>,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) {
+    if !config.preferences.customization.show_workspace_activity
+        || rect.is_empty()
+        || activity.items.is_empty()
+    {
+        return;
+    }
+    let key = workspace_activity_key(workspace_id);
+    let expanded = state
+        .expanded_background_activity
+        .contains(&(endpoint.clone(), key.clone()));
+    let visible = usize::from(rect.height.saturating_sub(1));
+    let max_offset = activity.items.len().saturating_sub(visible);
+    let offset = state
+        .background_activity_offsets
+        .get(&(endpoint.clone(), key.clone()))
+        .copied()
+        .unwrap_or(0)
+        .min(max_offset);
+    activity.render(buffer, rect, expanded, offset, config);
+    if expanded && visible > 0 && max_offset > 0 {
+        hits.background_activity_scroll
+            .push((rect, endpoint.clone(), key.clone(), max_offset));
+    }
+    hits.background_activity.push((
+        Rect::new(rect.x, rect.y, rect.width, 1),
+        endpoint.clone(),
+        key,
+    ));
+}
+
+/// Resolve both display and measured rows from the same selected-tab presentation.
+pub(in crate::client::shell) fn customized_workspace_rows(
+    snapshot: &ClientShellSnapshot,
+    workspace: &ClientShellWorkspace,
+    status: crate::api::schema::AgentStatus,
+    indented: bool,
+    config: &ClientShellConfig,
+) -> Vec<Vec<crate::ui::ResolvedToken>> {
+    let customization = &config.preferences.customization;
+    let mut rows = workspace_rows(workspace, status, indented, &config.spaces);
+    if !customization.show_selected_tab_name && !customization.selected_tab_name_as_workspace {
+        return rows;
+    }
+    let Some(tab) = snapshot.tabs.iter().find(|tab| {
+        tab.workspace_id == workspace.workspace_id
+            && tab.tab_id == workspace.active_tab_id
+            && !tab.label.trim().is_empty()
+    }) else {
+        return rows;
+    };
+    if customization.selected_tab_name_as_workspace {
+        for row in &mut rows {
+            for token in row {
+                if let crate::ui::ResolvedTokenKind::Workspace(label) = &mut token.kind {
+                    label.clone_from(&tab.label);
+                }
+            }
+        }
+    }
+    if customization.show_selected_tab_name {
+        rows.push(vec![crate::ui::ResolvedToken {
+            kind: crate::ui::ResolvedTokenKind::Tab(tab.label.clone()),
+            style: Default::default(),
+        }]);
+    }
+    rows
+}
+
 pub(in crate::client::shell) fn workspace_rows(
     workspace: &ClientShellWorkspace,
     status: crate::api::schema::AgentStatus,
@@ -693,15 +871,16 @@ pub(in crate::client::shell) fn render_workspace_rows(
     buffer: &mut Buffer,
     area: Rect,
     status: crate::api::schema::AgentStatus,
-    indicators: crate::config::StatusIndicatorStyle,
+    config: &ClientShellConfig,
     entry: &WorkspaceEntry,
+    activity: &super::super::background_activity::BackgroundActivity,
     rows: Vec<Vec<crate::ui::ResolvedToken>>,
     focused: bool,
     selected: bool,
     navigating: bool,
     dragged: bool,
-    palette: &Palette,
 ) {
+    let palette = &config.palette;
     for (row_index, row) in rows.iter().enumerate() {
         let y = area.y + row_index as u16;
         if y >= area.bottom() {
@@ -753,10 +932,10 @@ pub(in crate::client::shell) fn render_workspace_rows(
         let spans = crate::ui::resolved_token_spans(
             row,
             (
-                status_icon(status, indicators),
-                Style::default().fg(status_color(status, palette)),
+                status_icon(status, config.status_indicators),
+                workspace_activity_icon_style(status, activity, config),
             ),
-            Style::default().fg(status_color(status, palette)),
+            Style::default().fg(config.status_color(status)),
             workspace_style,
             secondary_style,
             Style::default().fg(palette.overlay1),

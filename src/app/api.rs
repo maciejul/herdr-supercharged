@@ -206,8 +206,16 @@ impl App {
             return self.handle_api_worktree_remove_finished(*result);
         }
 
+        if self.consume_suspended_agent_event(&ev) {
+            return Vec::new();
+        }
         let mut worktree_restore_updates = Vec::new();
         if let AppEvent::PaneDied { pane_id, .. } = &ev {
+            // A retained/respawned pane must not inherit a dead foreground job.
+            self.state.handle_app_event(AppEvent::ShellCommandObserved {
+                pane_id: *pane_id,
+                command: None,
+            });
             if self
                 .state
                 .popup_pane
@@ -2022,6 +2030,40 @@ mod tests {
             runtime.shutdown();
         }
         let _ = std::fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn retained_pane_exit_clears_cached_ordinary_command() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("retained")];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.state.workspaces[0]
+            .terminal_id(pane_id)
+            .unwrap()
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .active_shell_command = Some("sleep".to_owned());
+        app.pending_worktree_remove_runtime_exits.insert(pane_id, 1);
+        app.handle_internal_event(AppEvent::PaneDied {
+            pane_id,
+            exit_reason: crate::platform::ChildExitReason::Exited,
+        });
+        assert!(app.state.workspaces[0].pane_state(pane_id).is_some());
+        assert!(app.state.terminals[&terminal_id]
+            .active_shell_command
+            .is_none());
     }
 
     #[test]

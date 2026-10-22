@@ -412,3 +412,57 @@ fn plain_and_ime_text_fill_every_field_on_a_report_all_host() {
         );
     }
 }
+
+#[test]
+fn rename_tab_option_waits_for_success_before_renaming_its_workspace() {
+    use crate::api::schema::{Method, ResponseResult};
+    for enabled in [false, true] {
+        for success in [false, true] {
+            let mut state = shell(3);
+            state
+                .config
+                .preferences
+                .customization
+                .rename_workspace_with_tab = enabled;
+            *editor(&mut state) = TextEditor::from("Project review");
+            let outcome = press(&mut state, KeyCode::Enter, KeyModifiers::NONE);
+            let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+                panic!("one rename request")
+            };
+            let Method::TabRename(params) = &request.method else {
+                panic!("tab renamed first")
+            };
+            let tab = state
+                .snapshot
+                .as_ref()
+                .unwrap()
+                .tabs
+                .iter()
+                .find(|tab| tab.tab_id == params.tab_id)
+                .unwrap();
+            let workspace_id = tab.workspace_id.clone();
+            let result = if success {
+                Ok(serde_json::from_value::<ResponseResult>(serde_json::json!({
+                    "type": "tab_info", "tab": {"tab_id": params.tab_id, "workspace_id": workspace_id,
+                    "number": 1,"label": params.label,"focused": true,"pane_count": 1,"agent_status": "idle"}
+                })).unwrap())
+            } else {
+                Err(ClientShellEndpointError {
+                    code: Some("tab_not_found".into()),
+                    message: "missing tab".into(),
+                })
+            };
+            let (_, actions) = state.handle_endpoint_result("boot-1", &request.id, result);
+            if enabled && success {
+                let [ClientShellAction::Endpoint { request, .. }] = &actions[..] else {
+                    panic!("workspace rename follows success")
+                };
+                assert!(
+                    matches!(&request.method, Method::WorkspaceRename(params) if params.workspace_id == workspace_id && params.label == "Project review")
+                );
+            } else {
+                assert!(actions.is_empty());
+            }
+        }
+    }
+}

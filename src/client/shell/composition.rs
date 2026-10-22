@@ -49,6 +49,8 @@ impl ClientShellState {
         // A resize invalidates pane geometry, not the healthy Local workspace chrome.
         let local_snapshot = self.snapshot.as_deref().filter(|_| {
             self.endpoints.len() == 1
+                && (!self.config.preferences.customization.space_groups_enabled
+                    || self.config.preferences.space_groups.is_empty())
                 && !self.sidebar_collapsed
                 && layout.sidebar.width > 0
                 && self.endpoint_status(&self.active_endpoint_id)
@@ -63,6 +65,8 @@ impl ClientShellState {
             remote_collapsed_groups: &self.remote_collapsed_groups,
             workspace_scroll: &mut self.workspace_scroll,
             agent_scroll: &mut self.agent_scroll,
+            expanded_background_activity: &self.expanded_background_activity,
+            background_activity_offsets: &self.background_activity_offsets,
             tab_scroll: &mut self.tab_scroll,
             reveal_focused_workspace: &mut self.reveal_focused_workspace,
             reveal_focused_tab: &mut self.reveal_focused_tab,
@@ -144,7 +148,10 @@ impl ClientShellState {
                 &self.config.palette,
             );
         }
-        FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[])
+        let mut frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
+        self.highlight_space_group_drop(&mut frame);
+        self.apply_completion_glow(&mut frame, layout.sidebar, std::time::Instant::now());
+        frame
     }
 
     pub(crate) fn compose(
@@ -179,10 +186,12 @@ impl ClientShellState {
         if self.pending_pane_surface.is_some()
             || self.pane_surface_generation != self.active_snapshot_generation
         {
+            self.completion_glow_deadline = None;
             return None;
         }
         let surface = self.pane_surface.as_ref()?;
         if snapshot.revision != surface.projection_revision {
+            self.completion_glow_deadline = None;
             return None;
         }
         let layout = self.layout(cols, rows);
@@ -219,6 +228,8 @@ impl ClientShellState {
                 remote_collapsed_groups: &self.remote_collapsed_groups,
                 workspace_scroll: &mut self.workspace_scroll,
                 agent_scroll: &mut self.agent_scroll,
+                expanded_background_activity: &self.expanded_background_activity,
+                background_activity_offsets: &self.background_activity_offsets,
                 tab_scroll: &mut self.tab_scroll,
                 reveal_focused_workspace: &mut self.reveal_focused_workspace,
                 reveal_focused_tab: &mut self.reveal_focused_tab,
@@ -645,8 +656,12 @@ impl ClientShellState {
         if let Some(overlay) = self.overlay.as_ref() {
             let mut composed = frame.to_ratatui_buffer()?;
             let cursor = if let ClientShellOverlay::ContextMenu(menu) = overlay {
-                let rendered =
-                    render::render_context_menu(&mut composed, menu, &self.config.palette)?;
+                let rendered = render::render_context_menu(
+                    &mut composed,
+                    menu,
+                    self.config.preferences.customization.space_groups_enabled,
+                    &self.config.palette,
+                )?;
                 occlusion.cover(rendered.area);
                 self.hits.context_menu_rows = rendered.menu_rows;
                 None
@@ -721,6 +736,8 @@ impl ClientShellState {
             self.hits.popup = None;
         }
         let graphics = self.compose_graphics(layout, &occlusion);
+        self.highlight_space_group_drop(&mut frame);
+        self.apply_completion_glow(&mut frame, layout.sidebar, std::time::Instant::now());
         Some(crate::client::frame_output::ComposedFrame { frame, graphics })
     }
 }
