@@ -37,6 +37,9 @@ pub(super) fn render_settings_overlay(
     buffer: &mut Buffer,
     settings: &ClientSettingsOverlay,
     integration_updates_available: bool,
+    tracking_enabled: Option<bool>,
+    unread_suspend_delay: Option<&str>,
+    customization: &preferences::CustomizationPreferences,
     palette: &Palette,
 ) -> Option<OverlayRender> {
     let integration_height = 14u16
@@ -47,7 +50,7 @@ pub(super) fn render_settings_overlay(
     } else {
         22
     };
-    let popup = popup(buffer.area, 76, height)?;
+    let popup = popup(buffer.area, 90, height.saturating_add(2))?;
     let inner = panel(buffer, popup, palette.accent, palette.panel_bg)?;
     if inner.width < 20 || inner.height < 8 {
         return None;
@@ -71,6 +74,7 @@ pub(super) fn render_settings_overlay(
             .iter()
             .any(|integration| integration.state == crate::api::schema::IntegrationState::Outdated);
     let mut tab_x = inner.x;
+    let mut tab_y = inner.y + 1;
     let mut tab_hits = Vec::new();
     for section in ClientSettingsSection::ALL {
         let badge = *section == ClientSettingsSection::Integrations && integration_badge;
@@ -79,8 +83,13 @@ pub(super) fn render_settings_overlay(
         } else {
             format!(" {} ", section.label())
         };
-        let width = display_width(&label).min(inner.right().saturating_sub(tab_x));
-        let rect = Rect::new(tab_x, inner.y + 1, width, 1);
+        let label_width = display_width(&label);
+        if tab_x > inner.x && tab_x.saturating_add(label_width) > inner.right() {
+            tab_x = inner.x;
+            tab_y += 1;
+        }
+        let width = label_width.min(inner.right().saturating_sub(tab_x));
+        let rect = Rect::new(tab_x, tab_y, width, 1);
         let active = *section == settings.section;
         let style = if active {
             Style::default()
@@ -107,14 +116,11 @@ pub(super) fn render_settings_overlay(
         }
         tab_hits.push((rect, *section));
         tab_x = tab_x.saturating_add(width.saturating_add(1));
-        if tab_x >= inner.right() {
-            break;
-        }
     }
     put_text(
         buffer,
         inner.x,
-        inner.y + 2,
+        tab_y + 1,
         inner.width,
         &"─".repeat(inner.width as usize),
         Style::default().fg(palette.surface0).bg(palette.panel_bg),
@@ -122,9 +128,9 @@ pub(super) fn render_settings_overlay(
 
     let content = Rect::new(
         inner.x,
-        inner.y + 4,
+        tab_y + 3,
         inner.width,
-        inner.height.saturating_sub(7),
+        inner.bottom().saturating_sub(tab_y + 6),
     );
     let mut choice_hits = Vec::new();
     match settings.section {
@@ -194,6 +200,177 @@ pub(super) fn render_settings_overlay(
                 &mut choice_hits,
             );
         }
+        ClientSettingsSection::Customization if settings.tracking_confirmation.is_some() => {
+            let enable = settings
+                .tracking_confirmation
+                .as_ref()
+                .is_some_and(|(enable, _)| *enable);
+            let lines = [
+                if enable {
+                    "Enable subagent and background-task tracking?"
+                } else {
+                    "Disable subagent and background-task tracking?"
+                },
+                "",
+                if enable {
+                    "This adds tracking hooks to installed Claude/Codex integrations."
+                } else {
+                    "This removes tracking hooks from Claude/Codex integrations."
+                },
+                "Session-resume hooks are preserved.",
+                "The change affects all Herdr sessions on this machine.",
+                "Restart running Claude/Codex sessions to load the hook change.",
+            ];
+            for (index, text) in lines.iter().take(content.height as usize).enumerate() {
+                put_text(
+                    buffer,
+                    content.x,
+                    content.y + index as u16,
+                    content.width,
+                    text,
+                    Style::default().fg(palette.text).bg(palette.panel_bg),
+                );
+            }
+        }
+        ClientSettingsSection::Customization => {
+            let on_off = |enabled| if enabled { "on" } else { "off" };
+            let labels = [
+                format!(
+                    "Space groups: {}",
+                    on_off(customization.space_groups_enabled)
+                ),
+                format!(
+                    "Selected tab below Space: {}",
+                    on_off(customization.show_selected_tab_name)
+                ),
+                format!(
+                    "Use selected tab as Space name: {}",
+                    on_off(customization.selected_tab_name_as_workspace)
+                ),
+                format!(
+                    "Working agent color: {}",
+                    customization.colors.working.label()
+                ),
+                format!("Subagent color: {}", customization.colors.subagents.label()),
+                format!(
+                    "Background task color: {}",
+                    customization.colors.background_tasks.label()
+                ),
+                format!(
+                    "Unread completion color: {}",
+                    customization.colors.completion.label()
+                ),
+                "Reset customization to defaults".to_owned(),
+                format!(
+                    "Subagent/background-task tracking: {}",
+                    tracking_enabled.map(on_off).unwrap_or("unavailable")
+                ),
+                format!(
+                    "Rename workspace when tab is renamed: {}",
+                    on_off(customization.rename_workspace_with_tab)
+                ),
+                format!(
+                    "Agent status dividers: {}",
+                    on_off(customization.show_agent_status_dividers)
+                ),
+                format!(
+                    "Activity beneath Spaces: {}",
+                    on_off(customization.show_workspace_activity)
+                ),
+                format!(
+                    "Activity beneath agents: {}",
+                    on_off(customization.show_agent_activity)
+                ),
+                format!(
+                    "Include agent shell tasks: {}",
+                    on_off(customization.include_agent_shell_tasks)
+                ),
+                format!(
+                    "Include terminal shell tasks: {}",
+                    on_off(customization.include_terminal_shell_tasks)
+                ),
+                format!(
+                    "Highlight active workspaces: {}",
+                    on_off(customization.highlight_workspace_activity)
+                ),
+                format!(
+                    "Workspace activity color: {}",
+                    customization.colors.workspace_activity.label()
+                ),
+                format!(
+                    "Automatic tab names: {}",
+                    on_off(customization.automatic_tab_names)
+                ),
+                format!(
+                    "Automatic Space names: {}",
+                    on_off(customization.automatic_workspace_names)
+                ),
+                format!(
+                    "Suspend unread tabs after: {}",
+                    unread_suspend_delay.unwrap_or("unavailable")
+                ),
+            ];
+            let visible = usize::from(content.height.saturating_sub(3));
+            let scroll = settings.selected.saturating_sub(visible.saturating_sub(1));
+            for (offset, (index, label)) in labels
+                .iter()
+                .enumerate()
+                .skip(scroll)
+                .take(visible)
+                .enumerate()
+            {
+                let rect = Rect::new(content.x, content.y + offset as u16, content.width, 1);
+                draw_choice(
+                    buffer,
+                    rect,
+                    label,
+                    index == settings.selected,
+                    false,
+                    palette,
+                );
+                choice_hits.push((rect, index));
+                let color = match index {
+                    3 => Some(customization.colors.working.color()),
+                    4 => Some(customization.colors.subagents.color()),
+                    5 => Some(customization.colors.background_tasks.color()),
+                    6 => Some(customization.colors.completion.color()),
+                    16 => Some(customization.colors.workspace_activity.color()),
+                    _ => None,
+                };
+                if let Some(color) = color {
+                    put_text(
+                        buffer,
+                        rect.right().saturating_sub(3),
+                        rect.y,
+                        2,
+                        "●",
+                        Style::default().fg(color),
+                    );
+                }
+            }
+            if let Some(message) = settings.tracking_message.as_deref() {
+                if content.height >= 3 {
+                    use ratatui::widgets::{Paragraph, Widget, Wrap};
+                    Paragraph::new(message)
+                        .style(Style::default().fg(palette.text).bg(palette.panel_bg))
+                        .wrap(Wrap { trim: true })
+                        .render(
+                            Rect::new(content.x, content.bottom() - 3, content.width, 2),
+                            buffer,
+                        );
+                }
+            }
+            if content.height > 0 {
+                put_text(
+                    buffer,
+                    content.x,
+                    content.bottom() - 1,
+                    content.width,
+                    "Enter/apply changes selection; tracking requires confirmation",
+                    Style::default().fg(palette.overlay1).bg(palette.panel_bg),
+                );
+            }
+        }
         ClientSettingsSection::Integrations => {
             render_integrations(buffer, content, settings, palette);
         }
@@ -204,14 +381,20 @@ pub(super) fn render_settings_overlay(
         .iter()
         .any(super::super::settings::integration_needs_install);
     let show_primary = settings.section != ClientSettingsSection::Integrations || installable;
-    let labels = if show_primary { vec![10, 12] } else { vec![12] };
+    let labels = if show_primary { vec![12, 12] } else { vec![12] };
     let buttons = row(inner, &labels, 2, inner.height.saturating_sub(1));
     let (primary, close) = if show_primary {
         let primary = buttons[0];
         button(
             buffer,
             primary,
-            if settings.section == ClientSettingsSection::Integrations {
+            if let Some((enable, _)) = settings.tracking_confirmation.as_ref() {
+                if *enable {
+                    " ↵ enable "
+                } else {
+                    " ↵ disable "
+                }
+            } else if settings.section == ClientSettingsSection::Integrations {
                 " ↵ install "
             } else {
                 " ↵ apply "
@@ -228,7 +411,11 @@ pub(super) fn render_settings_overlay(
     button(
         buffer,
         close,
-        " esc close ",
+        if settings.tracking_confirmation.is_some() {
+            " esc cancel "
+        } else {
+            " esc close "
+        },
         Style::default()
             .fg(palette.text)
             .bg(palette.surface0)

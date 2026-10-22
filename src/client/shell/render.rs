@@ -238,6 +238,8 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) remote_collapsed_groups: &'a HashMap<ClientEndpointId, HashSet<String>>,
     pub(super) workspace_scroll: &'a mut usize,
     pub(super) agent_scroll: &'a mut usize,
+    pub(super) expanded_background_activity: &'a HashSet<(ClientEndpointId, String)>,
+    pub(super) background_activity_offsets: &'a HashMap<(ClientEndpointId, String), usize>,
     pub(super) tab_scroll: &'a mut usize,
     pub(super) reveal_focused_workspace: &'a mut bool,
     pub(super) reveal_focused_tab: &'a mut bool,
@@ -268,7 +270,11 @@ pub(super) fn render_shell(
         );
     }
     if layout.sidebar.width > 0 {
-        if state.endpoints.len() > 1 {
+        if state.endpoints.len() > 1
+            || (!state.sidebar_collapsed
+                && config.preferences.customization.space_groups_enabled
+                && !config.preferences.space_groups.is_empty())
+        {
             if state.sidebar_collapsed {
                 super::endpoint_sidebar::render_collapsed(
                     buffer,
@@ -332,6 +338,8 @@ pub(super) fn render_shell(
         hits.workspaces.clear();
         hits.agents.clear();
         hits.endpoint_agents.clear();
+        hits.background_activity.clear();
+        hits.background_activity_scroll.clear();
         hits.tab_scroll_left = Rect::default();
         hits.tab_scroll_right = Rect::default();
         hits.new_tab = Rect::default();

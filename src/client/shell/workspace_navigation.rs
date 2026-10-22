@@ -128,6 +128,25 @@ impl ClientShellState {
                 };
                 render::workspace_entries(snapshot, collapsed_groups)
             };
+            let entries = if !mobile
+                && !self.sidebar_collapsed
+                && self.config.preferences.customization.space_groups_enabled
+            {
+                super::space_groups::grouped_rows(
+                    snapshot,
+                    entries,
+                    &endpoint.endpoint_id,
+                    &self.config.preferences.space_groups,
+                )
+                .into_iter()
+                .filter_map(|row| match row {
+                    super::space_groups::GroupedSpaceRow::Workspace(entry) => Some(entry),
+                    _ => None,
+                })
+                .collect()
+            } else {
+                entries
+            };
             for entry in entries {
                 targets.push(WorkspaceNavigationTarget {
                     endpoint_id: endpoint.endpoint_id.clone(),

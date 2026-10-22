@@ -114,6 +114,13 @@ pub(crate) fn render_tab_bar(
         } else {
             Style::default().fg(palette.overlay0).bg(palette.surface0)
         };
+        let style = if tab.agent_status == crate::api::schema::AgentStatus::Done {
+            style
+                .fg(config.preferences.customization.colors.completion.color())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            style
+        };
         let padding = width.saturating_sub(display_width(&name));
         let left = padding / 2;
         let text = format!(

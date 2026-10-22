@@ -3,9 +3,12 @@ use std::collections::{HashMap, HashSet, VecDeque};
 mod actions;
 mod agent_sidebar;
 mod aggregate_navigation;
+mod automatic_names;
+mod background_activity;
 mod machine_diagnostics;
 mod workspace_navigation;
 use workspace_navigation::{PendingWorkspaceHighlight, WorkspaceNavigationTarget};
+mod completion_glow;
 mod composition;
 mod config;
 mod context_menu;
@@ -31,6 +34,7 @@ mod preferences;
 mod render;
 mod scroll;
 mod settings;
+mod space_groups;
 mod state;
 mod surface_patch;
 mod text_editor;
@@ -228,7 +232,7 @@ fn status_color(
 ) -> ratatui::style::Color {
     use crate::api::schema::AgentStatus;
     match status {
-        AgentStatus::Working => palette.yellow,
+        AgentStatus::Working => ratatui::style::Color::Rgb(255, 165, 0),
         AgentStatus::Blocked => palette.red,
         AgentStatus::Done => palette.teal,
         AgentStatus::Idle => palette.green,
@@ -277,6 +281,31 @@ fn blit_pane_surface(target: &mut FrameData, source: &FrameData, area: Rect) {
         })
     });
     target.graphics.clear();
+}
+
+impl ClientShellConfig {
+    fn status_color(&self, status: crate::api::schema::AgentStatus) -> ratatui::style::Color {
+        match status {
+            crate::api::schema::AgentStatus::Working => {
+                self.preferences.customization.colors.working.color()
+            }
+            crate::api::schema::AgentStatus::Done => {
+                self.preferences.customization.colors.completion.color()
+            }
+            _ => status_color(status, &self.palette),
+        }
+    }
+
+    fn status_icon_style(&self, status: crate::api::schema::AgentStatus) -> Style {
+        let style = Style::default().fg(self.status_color(status));
+        if status == crate::api::schema::AgentStatus::Done
+            && self.status_indicators == crate::config::StatusIndicatorStyle::Dots
+        {
+            style.add_modifier(Modifier::BOLD)
+        } else {
+            style
+        }
+    }
 }
 
 #[cfg(test)]

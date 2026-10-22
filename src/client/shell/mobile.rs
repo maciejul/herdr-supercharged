@@ -112,7 +112,7 @@ fn render_header_status(
             status_icon(workspace.agent_status, config.status_indicators)
         ),
         Style::default()
-            .fg(status_color(workspace.agent_status, palette))
+            .fg(config.status_color(workspace.agent_status))
             .bg(palette.panel_bg),
     );
     put_text(
@@ -324,7 +324,7 @@ fn render_agent_summary(
         let color = if shown == 0 {
             match status {
                 AgentStatus::Done => config.palette.blue,
-                _ => status_color(status, &config.palette),
+                _ => config.status_color(status),
             }
         } else {
             config.palette.overlay1
@@ -614,7 +614,16 @@ fn mobile_items(
         endpoints,
         active_endpoint_id,
         config.agent_panel_sort,
-    );
+    )
+    .into_iter()
+    .filter(|row| {
+        config
+            .preferences
+            .customization
+            .include_terminal_shell_tasks
+            || !super::background_activity::activity_only(&row.agent.tokens)
+    })
+    .collect::<Vec<_>>();
     let agent_view_label = snapshot.agent_view_label.as_deref();
     if !agents.is_empty() || agent_view_label.is_some() {
         let title = agent_view_label
@@ -710,7 +719,9 @@ fn mobile_items(
                                 .fg(if endpoint.stale() {
                                     palette.overlay0
                                 } else {
-                                    status_color(agent.agent_status, palette)
+                                    super::background_activity::agent_icon_style(agent, config)
+                                        .fg
+                                        .unwrap_or(palette.text)
                                 })
                                 .bg(background)
                                 .add_modifier(dim),
@@ -819,7 +830,7 @@ fn mobile_items(
             let status = if endpoint.stale() {
                 palette.overlay0
             } else {
-                status_color(workspace.agent_status, palette)
+                config.status_color(workspace.agent_status)
             };
             let stale_detail = if endpoint.stale() {
                 format!(" · {}", mobile_endpoint_state(endpoint.status))

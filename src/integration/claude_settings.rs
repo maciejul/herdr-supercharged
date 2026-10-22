@@ -174,11 +174,12 @@ fn remove_value_event_commands(
                 .iter()
                 .any(|command| is_matching_command_hook(entry, command))
         });
-        removed |= command_entries.len() != before;
-        !command_entries.is_empty()
+        let entry_changed = command_entries.len() != before;
+        removed |= entry_changed;
+        !command_entries.is_empty() || !entry_changed
     });
 
-    if entries.is_empty() && canonical.is_none() {
+    if entries.is_empty() && removed && canonical.is_none() {
         hooks.remove(event);
     }
     Ok(removed)
@@ -295,6 +296,7 @@ fn remove_event_commands(
         .array_value()
         .ok_or_else(|| io::Error::other(format!("hook entries for {event} must be an array")))?;
     let mut canonical_preserved = false;
+    let mut removed = false;
 
     for entry in entries.elements() {
         if installing
@@ -316,6 +318,7 @@ fn remove_event_commands(
             continue;
         };
 
+        let mut entry_changed = false;
         for command_entry in command_entries.elements() {
             let matches = command_entry.to_serde_value().is_some_and(|value| {
                 commands
@@ -324,15 +327,17 @@ fn remove_event_commands(
             });
             if matches {
                 command_entry.remove();
+                entry_changed = true;
+                removed = true;
             }
         }
 
-        if command_entries.elements().is_empty() {
+        if entry_changed && command_entries.elements().is_empty() {
             entry.remove();
         }
     }
 
-    if entries.elements().is_empty() && !(installing && event == "SessionStart") {
+    if removed && entries.elements().is_empty() && !(installing && event == "SessionStart") {
         event_property.remove();
     }
 
@@ -584,6 +589,76 @@ fn strict_parse_options() -> ParseOptions {
         allow_hexadecimal_numbers: false,
         allow_unary_plus_numbers: false,
     }
+}
+
+/// Edit only our exact companion commands; CST preserves all unrelated text.
+#[cfg(unix)]
+pub(super) fn edit_background_hooks(
+    content: &str,
+    settings_path: &Path,
+    command: &str,
+    installing: bool,
+) -> io::Result<String> {
+    let events = super::background_hooks::events_for_command(command);
+    let original = parse_value(content, settings_path)?;
+    let mut desired = original.clone();
+    if !installing && original.get("hooks").is_none() {
+        return Ok(content.to_owned());
+    }
+    let hooks = ensure_hooks_object(&mut desired, settings_path, "agent settings", "agent hooks")?;
+    let commands = vec![command.to_owned()];
+    for (event, matcher) in &events {
+        remove_value_event_commands(hooks, event, &commands, None)?;
+        if installing {
+            ensure_command_hook(hooks, event, command.to_owned(), 5, *matcher)?;
+        }
+    }
+    if desired == original {
+        return Ok(content.to_owned());
+    }
+    let root = CstRootNode::parse(content, &strict_parse_options()).map_err(|err| {
+        io::Error::other(format!(
+            "failed to parse {}: {err}",
+            settings_path.display()
+        ))
+    })?;
+    let value = root
+        .value()
+        .ok_or_else(|| io::Error::other("agent settings must be an object"))?;
+    reject_duplicate_keys(&value, settings_path)?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| io::Error::other("agent settings must be an object"))?;
+    let hooks = match object.get("hooks") {
+        Some(property) => property.object_value(),
+        None => object
+            .append("hooks", CstInputValue::Object(Vec::new()))
+            .object_value(),
+    }
+    .ok_or_else(|| io::Error::other("agent hooks must be an object"))?;
+    for (event, matcher) in &events {
+        remove_event_commands(&hooks, event, &commands, false, &Value::Null)?;
+        if installing {
+            let entries = match hooks.get(event) {
+                Some(property) => property.array_value(),
+                None => hooks
+                    .append(event, CstInputValue::Array(Vec::new()))
+                    .array_value(),
+            }
+            .ok_or_else(|| {
+                io::Error::other(format!("hook entries for {event} must be an array"))
+            })?;
+            let input = match matcher {
+                Some(matcher) => {
+                    let matcher = *matcher;
+                    json!({matcher: matcher, hooks: [{"type": "command", command: command, timeout: 5u64}]})
+                }
+                None => json!({hooks: [{"type": "command", command: command, timeout: 5u64}]}),
+            };
+            entries.append(input);
+        }
+    }
+    verify_updated(root.to_string(), settings_path, &desired)
 }
 
 #[cfg(test)]

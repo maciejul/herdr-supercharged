@@ -7,6 +7,132 @@ static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(1);
 
 use serde::{Deserialize, Serialize};
 
+/// Client-only presentation preferences, persisted independently of runtime config.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub(super) struct CustomizationPreferences {
+    pub(super) automatic_tab_names: bool,
+    pub(super) automatic_workspace_names: bool,
+    pub(super) space_groups_enabled: bool,
+    pub(super) show_selected_tab_name: bool,
+    pub(super) selected_tab_name_as_workspace: bool,
+    pub(super) rename_workspace_with_tab: bool,
+    pub(super) show_agent_status_dividers: bool,
+    pub(super) show_workspace_activity: bool,
+    pub(super) show_agent_activity: bool,
+    pub(super) include_agent_shell_tasks: bool,
+    pub(super) include_terminal_shell_tasks: bool,
+    pub(super) highlight_workspace_activity: bool,
+    pub(super) colors: StatusColors,
+}
+
+impl Default for CustomizationPreferences {
+    fn default() -> Self {
+        Self {
+            automatic_tab_names: true,
+            automatic_workspace_names: true,
+            space_groups_enabled: true,
+            show_selected_tab_name: false,
+            selected_tab_name_as_workspace: false,
+            rename_workspace_with_tab: false,
+            show_agent_status_dividers: true,
+            show_workspace_activity: true,
+            show_agent_activity: true,
+            include_agent_shell_tasks: true,
+            include_terminal_shell_tasks: true,
+            highlight_workspace_activity: true,
+            colors: StatusColors::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub(super) struct StatusColors {
+    pub(super) working: ColorChoice,
+    pub(super) subagents: ColorChoice,
+    pub(super) background_tasks: ColorChoice,
+    pub(super) completion: ColorChoice,
+    pub(super) workspace_activity: ColorChoice,
+}
+
+impl Default for StatusColors {
+    fn default() -> Self {
+        Self {
+            working: ColorChoice::Orange,
+            subagents: ColorChoice::Yellow,
+            background_tasks: ColorChoice::Blue,
+            completion: ColorChoice::Green,
+            workspace_activity: ColorChoice::Blue,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ColorChoice {
+    Orange,
+    Yellow,
+    Blue,
+    Green,
+    Red,
+    Purple,
+    Cyan,
+    White,
+}
+
+impl ColorChoice {
+    pub(super) fn color(self) -> ratatui::style::Color {
+        use ratatui::style::Color;
+        match self {
+            Self::Orange => Color::Rgb(255, 165, 0),
+            Self::Yellow => Color::Rgb(230, 190, 30),
+            Self::Blue => Color::Rgb(60, 135, 240),
+            Self::Green => Color::Rgb(0, 180, 32),
+            Self::Red => Color::Rgb(230, 70, 70),
+            Self::Purple => Color::Rgb(180, 110, 230),
+            Self::Cyan => Color::Rgb(0, 180, 190),
+            Self::White => Color::Rgb(220, 220, 220),
+        }
+    }
+
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Orange => "orange",
+            Self::Yellow => "yellow",
+            Self::Blue => "blue",
+            Self::Green => "green",
+            Self::Red => "red",
+            Self::Purple => "purple",
+            Self::Cyan => "cyan",
+            Self::White => "white",
+        }
+    }
+
+    pub(super) fn next(self) -> Self {
+        match self {
+            Self::Orange => Self::Yellow,
+            Self::Yellow => Self::Blue,
+            Self::Blue => Self::Green,
+            Self::Green => Self::Red,
+            Self::Red => Self::Purple,
+            Self::Purple => Self::Cyan,
+            Self::Cyan => Self::White,
+            Self::White => Self::Orange,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub(super) struct NamedSpaceGroup {
+    pub(super) endpoint: String,
+    pub(super) name: String,
+    #[serde(default)]
+    pub(super) workspace_ids: Vec<String>,
+    #[serde(default)]
+    pub(super) collapsed: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(super) struct ClientRemoteCollapsedGroups {
     pub(super) profile_id: String,
@@ -16,6 +142,10 @@ pub(super) struct ClientRemoteCollapsedGroups {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub(super) struct ClientChromePreferences {
+    #[serde(default)]
+    pub(super) customization: CustomizationPreferences,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) space_groups: Vec<NamedSpaceGroup>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) sidebar_width: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -86,6 +216,38 @@ pub(super) fn store(path: &Path, preferences: ClientChromePreferences) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_preferences_and_partial_customization_get_expected_defaults() {
+        let old: ClientChromePreferences = serde_json::from_str("{}").expect("old preferences");
+        assert!(old.customization.space_groups_enabled);
+        assert!(old.customization.automatic_tab_names);
+        assert!(old.customization.automatic_workspace_names);
+        let disabled: ClientChromePreferences = serde_json::from_str(
+            r#"{"customization":{"automatic_tab_names":false,"automatic_workspace_names":false}}"#,
+        )
+        .unwrap();
+        let saved = serde_json::to_string(&disabled).unwrap();
+        let loaded: ClientChromePreferences = serde_json::from_str(&saved).unwrap();
+        assert!(!loaded.customization.automatic_tab_names);
+        assert!(!loaded.customization.automatic_workspace_names);
+        assert!(!old.customization.show_selected_tab_name);
+        assert_eq!(
+            old.customization.colors.completion.color(),
+            ratatui::style::Color::Rgb(0, 180, 32)
+        );
+        let partial: ClientChromePreferences = serde_json::from_str(
+            r#"{"customization":{"show_selected_tab_name":true,"colors":{"working":"purple"}}}"#,
+        )
+        .expect("partial customization");
+        assert!(partial.customization.space_groups_enabled);
+        assert!(partial.customization.show_selected_tab_name);
+        assert_eq!(partial.customization.colors.working, ColorChoice::Purple);
+        assert_eq!(
+            partial.customization.colors.background_tasks,
+            ColorChoice::Blue
+        );
+    }
 
     #[test]
     fn endpoint_paths_are_stable_and_distinct() {

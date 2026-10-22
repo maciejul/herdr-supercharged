@@ -130,6 +130,8 @@ pub struct TerminalState {
     pub id: TerminalId,
     pub cwd: PathBuf,
     pub detected_agent: Option<Agent>,
+    /// Cached by the existing process probe; never read from the OS while rendering.
+    pub active_shell_command: Option<String>,
     pub fallback_state: AgentState,
     fallback_visible_blocker: bool,
     fallback_observed_at: Option<Instant>,
@@ -170,6 +172,7 @@ impl TerminalState {
             id,
             cwd,
             detected_agent: None,
+            active_shell_command: None,
             fallback_state: AgentState::Unknown,
             fallback_visible_blocker: false,
             fallback_observed_at: None,

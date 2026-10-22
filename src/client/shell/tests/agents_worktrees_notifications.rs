@@ -257,9 +257,9 @@ fn duplicate_repo_parents_remain_visible_and_focusable_when_collapsed() {
             let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
                 panic!("repository workspace context menu");
             };
-            assert_eq!(menu.items()[1].label, "Close");
+            assert_eq!(menu.items(true)[1].label, "Close");
             assert_eq!(
-                menu.items()
+                menu.items(true)
                     .iter()
                     .any(|item| matches!(item.action, ClientContextMenuAction::ToggleGroup)),
                 linked_child

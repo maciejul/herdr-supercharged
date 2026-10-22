@@ -466,6 +466,7 @@ impl AppState {
         for pane in tab.panes.values_mut() {
             if !pane.seen {
                 pane.seen = true;
+                pane.unread_since = None;
                 changed = true;
             }
         }
@@ -1450,6 +1451,22 @@ impl AppState {
                 }
                 Vec::new()
             }
+            AppEvent::ShellCommandObserved { pane_id, command } => self
+                .update_terminal_state(pane_id, |terminal| {
+                    if terminal.active_shell_command == command {
+                        return None;
+                    }
+                    terminal.active_shell_command = command;
+                    terminal.revision = terminal.revision.saturating_add(1);
+                    Some(TerminalStateMutation {
+                        effective_state_change: Some(
+                            terminal.unchanged_effective_state_change_at(Instant::now()),
+                        ),
+                        ..TerminalStateMutation::default()
+                    })
+                })
+                .into_iter()
+                .collect(),
             AppEvent::AgentProcessDetected {
                 pane_id,
                 agent,
@@ -1845,6 +1862,11 @@ impl AppState {
             pane.seen = true;
         } else if !suppress_completion && is_completion_transition(change) {
             pane.seen = suppress_active_tab_notifications;
+        }
+        if pane.seen {
+            pane.unread_since = None;
+        } else {
+            pane.unread_since.get_or_insert_with(Instant::now);
         }
         let seen = pane.seen;
 

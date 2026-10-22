@@ -965,3 +965,222 @@ fn resize_mode_reuses_endpoint_resize_and_stays_active_until_done() {
     assert!(state.handle_input_bytes(b"\r").actions.is_empty());
     assert_eq!(state.mode, ClientShellMode::Terminal);
 }
+
+#[test]
+fn customization_settings_persist_without_deleting_groups() {
+    let path =
+        std::env::temp_dir().join(format!("herdr-customization-{}.json", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    config.preferences_path = Some(path.clone());
+    config
+        .preferences
+        .space_groups
+        .push(super::super::preferences::NamedSpaceGroup {
+            endpoint: "local".to_owned(),
+            name: "Development".to_owned(),
+            workspace_ids: vec!["workspace-1".to_owned()],
+            collapsed: true,
+        });
+    let mut state = ClientShellState::new(config);
+    state.open_settings_overlay();
+    let mut outcome = ClientShellInput::default();
+    state.select_settings_section(ClientSettingsSection::Customization, &mut outcome);
+    for selected in (0..7).chain(9..19) {
+        state.select_settings_choice(selected);
+        state.apply_settings_choice(&mut outcome);
+    }
+    let saved = super::super::preferences::load(&path).expect("saved preferences");
+    assert!(!saved.customization.space_groups_enabled);
+    assert!(!saved.customization.automatic_tab_names);
+    assert!(!saved.customization.automatic_workspace_names);
+    assert!(saved.customization.show_selected_tab_name);
+    assert!(saved.customization.selected_tab_name_as_workspace);
+    assert!(saved.customization.rename_workspace_with_tab);
+    assert!(!saved.customization.show_agent_status_dividers);
+    assert!(!saved.customization.show_workspace_activity);
+    assert!(!saved.customization.show_agent_activity);
+    assert!(!saved.customization.include_agent_shell_tasks);
+    assert!(!saved.customization.include_terminal_shell_tasks);
+    assert!(!saved.customization.highlight_workspace_activity);
+    assert_eq!(
+        saved.customization.colors.workspace_activity,
+        super::super::preferences::ColorChoice::Green
+    );
+    assert_eq!(saved.space_groups[0].workspace_ids, ["workspace-1"]);
+    assert_eq!(
+        saved.customization.colors.working,
+        super::super::preferences::ColorChoice::Yellow
+    );
+    state.cancel_settings_overlay();
+    assert_eq!(state.config.preferences.customization, saved.customization);
+    state.open_settings_overlay();
+    state.select_settings_section(ClientSettingsSection::Customization, &mut outcome);
+    state.select_settings_choice(7);
+    state.apply_settings_choice(&mut outcome);
+    let saved = super::super::preferences::load(&path).expect("reset preferences");
+    assert_eq!(
+        saved.customization,
+        super::super::preferences::CustomizationPreferences::default()
+    );
+    assert_eq!(saved.space_groups[0].name, "Development");
+    std::fs::remove_file(path).expect("remove preferences");
+}
+
+#[test]
+fn customization_settings_tab_and_choices_are_accessible_on_narrow_terminal() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.open_settings_overlay();
+    state.compose(65, 24).expect("settings frame");
+    assert!(state
+        .hits
+        .settings_tabs
+        .iter()
+        .any(|(rect, section)| *section == ClientSettingsSection::Customization && rect.width > 0));
+    let mut outcome = ClientShellInput::default();
+    state.select_settings_section(ClientSettingsSection::Customization, &mut outcome);
+    state.select_settings_choice(7);
+    state.compose(65, 24).expect("customization frame");
+    assert!(state
+        .hits
+        .settings_choices
+        .iter()
+        .any(|(_, index)| *index == 7));
+}
+
+fn tracking_settings_state(enabled: Option<bool>) -> ClientShellState {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut projected = snapshot();
+    if let Some(enabled) = enabled {
+        projected
+            .commands
+            .push(crate::protocol::ClientShellCommand {
+                command_id: if enabled {
+                    "tracking.disable"
+                } else {
+                    "tracking.enable"
+                }
+                .into(),
+                binding_label: String::new(),
+                binding_labels: vec![],
+                action: crate::protocol::ClientShellCommandAction::Shell,
+                description: None,
+            });
+    }
+    state.set_snapshot(Box::new(projected));
+    state.set_pane_surface(surface());
+    state.open_settings_overlay();
+    state.select_settings_section(
+        ClientSettingsSection::Customization,
+        &mut ClientShellInput::default(),
+    );
+    state.select_settings_choice(8);
+    state
+}
+
+#[test]
+fn tracking_setting_requires_confirmation_for_enable_and_disable() {
+    for enabled in [false, true] {
+        let mut state = tracking_settings_state(Some(enabled));
+        let first = state.handle_input_bytes(b"\r");
+        assert!(first.actions.is_empty());
+        assert!(
+            matches!(&state.overlay, Some(ClientShellOverlay::Settings(settings)) if settings.tracking_confirmation.as_ref().is_some_and(|(enable, _)| *enable != enabled))
+        );
+        let frame = state.compose(100, 40).expect("confirmation frame");
+        let text = frame_rows(&frame).join("\n");
+        assert!(text.contains("Session-resume hooks are preserved"));
+        assert!(text.contains("all Herdr sessions on this machine"));
+        assert!(state.hits.settings_choices.is_empty());
+        let confirmed = state.handle_input_bytes(b"\r");
+        assert!(
+            matches!(&confirmed.actions[..], [ClientShellAction::Endpoint { request, .. }] if matches!(&request.method, crate::api::schema::Method::CommandInvoke(params) if params.command_id == if enabled { "tracking.disable" } else { "tracking.enable" }))
+        );
+        assert!(
+            state.handle_input_bytes(b"\r").actions.is_empty(),
+            "pending request must not duplicate"
+        );
+    }
+}
+
+#[test]
+fn tracking_setting_cancel_unavailable_and_changed_state_do_not_mutate_hooks() {
+    let mut state = tracking_settings_state(Some(false));
+    assert!(state.handle_input_bytes(b"\r").actions.is_empty());
+    assert!(state.handle_input_bytes(b"\x1b").actions.is_empty());
+    assert!(
+        matches!(&state.overlay, Some(ClientShellOverlay::Settings(settings)) if settings.tracking_confirmation.is_none())
+    );
+    state.select_settings_choice(7);
+    assert!(
+        state.handle_input_bytes(b"\r").actions.is_empty(),
+        "reset must never change machine hooks"
+    );
+    let mut state = tracking_settings_state(None);
+    assert!(state.handle_input_bytes(b"\r").actions.is_empty());
+    assert!(
+        matches!(&state.overlay, Some(ClientShellOverlay::Settings(settings)) if settings.tracking_message.as_deref().is_some_and(|text| text.contains("unavailable")))
+    );
+    let mut state = tracking_settings_state(Some(false));
+    state.handle_input_bytes(b"\r");
+    state.set_snapshot(Box::new(snapshot()));
+    assert!(state.handle_input_bytes(b"\r").actions.is_empty());
+}
+
+#[test]
+fn tracking_endpoint_error_is_visible_in_settings() {
+    let mut state = tracking_settings_state(Some(false));
+    state.handle_input_bytes(b"\r");
+    state.handle_input_bytes(b"\r");
+    state.handle_settings_endpoint_result(
+        PendingEndpointKind::BackgroundTracking,
+        Err(ClientShellEndpointError {
+            code: None,
+            message: "hooks file is read-only".into(),
+        }),
+    );
+    assert!(
+        matches!(&state.overlay, Some(ClientShellOverlay::Settings(settings)) if !settings.tracking_pending && settings.tracking_message.as_deref().is_some_and(|text| text.contains("hooks file is read-only")))
+    );
+}
+
+#[test]
+fn unread_suspension_settings_use_endpoint_value_and_only_send_supported_command() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    let mut projected = snapshot();
+    projected
+        .commands
+        .push(crate::protocol::ClientShellCommand {
+            command_id: "unread-suspend.delay.86400".into(),
+            binding_label: String::new(),
+            binding_labels: Vec::new(),
+            action: crate::protocol::ClientShellCommandAction::Shell,
+            description: None,
+        });
+    state.set_snapshot(Box::new(projected));
+    state.open_settings_overlay();
+    let mut outcome = ClientShellInput::default();
+    state.select_settings_section(ClientSettingsSection::Customization, &mut outcome);
+    state.select_settings_choice(19);
+    state.apply_settings_choice(&mut outcome);
+    assert!(outcome.actions.iter().any(|action| matches!(action,
+        ClientShellAction::Endpoint { request, .. } if matches!(&request.method,
+            crate::api::schema::Method::CommandInvoke(params) if params.command_id == "unread-suspend.delay.86400"))));
+    assert_eq!(
+        super::super::settings::unread_suspend_delay(state.snapshot.as_deref())
+            .map(|(_, label)| label),
+        Some("24h (default)")
+    );
+    // The UI does not optimistically replace the server's value before its snapshot.
+    let mut old = snapshot();
+    old.commands.clear();
+    state.set_snapshot(Box::new(old));
+    state.open_settings_overlay();
+    let mut outcome = ClientShellInput::default();
+    state.select_settings_section(ClientSettingsSection::Customization, &mut outcome);
+    state.select_settings_choice(19);
+    state.apply_settings_choice(&mut outcome);
+    assert!(outcome.actions.is_empty());
+}

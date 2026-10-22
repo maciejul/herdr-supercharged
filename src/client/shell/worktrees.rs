@@ -527,10 +527,14 @@ impl ClientShellState {
             }
             (
                 PendingEndpointKind::Generic
+                | PendingEndpointKind::WorkspaceCreateInGroup { .. }
+                | PendingEndpointKind::TabRenameWorkspace { .. }
                 | PendingEndpointKind::ProductAnnouncementDismiss { .. }
                 | PendingEndpointKind::ReleaseNotesDismiss
                 | PendingEndpointKind::PopupCommand
                 | PendingEndpointKind::ReloadConfig
+                | PendingEndpointKind::BackgroundTracking
+                | PendingEndpointKind::UnreadSuspendDelay
                 | PendingEndpointKind::IntegrationList
                 | PendingEndpointKind::IntegrationInstall
                 | PendingEndpointKind::SelectionCopy

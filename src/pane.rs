@@ -794,6 +794,7 @@ fn sync_content_change_acquisition(
 
 #[derive(Debug, Clone)]
 struct ProcessProbeResult {
+    ordinary_command: Option<String>,
     process_group_id: Option<u32>,
     foreground_is_pane_shell: bool,
     agent: Option<Agent>,
@@ -841,6 +842,7 @@ fn process_probe_result(
     (agent, process_name, agent_pid): (Agent, String, u32),
 ) -> ProcessProbeResult {
     ProcessProbeResult {
+        ordinary_command: None,
         process_group_id: Some(job.process_group_id),
         foreground_is_pane_shell: job.processes.iter().any(|process| process.pid == pid),
         agent: Some(agent),
@@ -863,6 +865,56 @@ fn hinted_process_probe_result(
             agent_pid,
         ),
     )
+}
+
+/// A job in a different foreground group is positive execution evidence. The
+/// pane's own shell (including prompt helpers in its group) is never a task.
+fn ordinary_foreground_command(
+    shell_pid: u32,
+    job: &crate::platform::ForegroundJob,
+) -> Option<String> {
+    if job.process_group_id == shell_pid
+        || job.processes.iter().any(|process| process.pid == shell_pid)
+    {
+        return None;
+    }
+    let process = job
+        .processes
+        .iter()
+        .find(|process| process.pid == job.process_group_id)?;
+    if crate::platform::is_pane_shell_process_name(&process.name) {
+        // A nested interactive shell is idle unless a separate command takes
+        // its foreground group. Avoid treating it as a permanent running task.
+        return None;
+    }
+    let name = std::path::Path::new(&process.name).file_name()?.to_str()?;
+    (!name.is_empty()).then(|| {
+        name.chars()
+            .filter(|ch| !ch.is_control())
+            .take(96)
+            .collect()
+    })
+}
+
+async fn publish_shell_command_observation(
+    events: &mpsc::Sender<AppEvent>,
+    pane_id: PaneId,
+    last: &mut Option<String>,
+    command: Option<String>,
+) {
+    if *last == command {
+        return;
+    }
+    if events
+        .send(AppEvent::ShellCommandObserved {
+            pane_id,
+            command: command.clone(),
+        })
+        .await
+        .is_ok()
+    {
+        *last = command;
+    }
 }
 
 fn probe_foreground_process_from_jobs(
@@ -896,6 +948,7 @@ fn probe_foreground_process_from_jobs(
             return process_probe_result(job, pid, identified);
         }
         return ProcessProbeResult {
+            ordinary_command: ordinary_foreground_command(pid, job),
             process_group_id: Some(job.process_group_id),
             foreground_is_pane_shell: job.processes.iter().any(|process| process.pid == pid),
             agent: None,
@@ -905,6 +958,7 @@ fn probe_foreground_process_from_jobs(
     }
 
     ProcessProbeResult {
+        ordinary_command: None,
         process_group_id: foreground_pgid,
         foreground_is_pane_shell: false,
         agent: None,
@@ -955,6 +1009,7 @@ fn spawn_basic_detection_task(
         let mut last_process_check = std::time::Instant::now();
         let mut last_foreground_pgid = None;
         let mut has_process_probe = false;
+        let mut last_shell_command = None;
         let mut acquisition_started_at = None;
         let mut last_content_change_at = None;
         let mut pending_foreground_shell_clear = false;
@@ -1055,6 +1110,13 @@ fn spawn_basic_detection_task(
                 let had_process_probe = has_process_probe;
                 has_process_probe = true;
                 let probe = probe_foreground_process(pid, foreground_pgid);
+                publish_shell_command_observation(
+                    &state_events,
+                    pane_id,
+                    &mut last_shell_command,
+                    probe.ordinary_command.clone(),
+                )
+                .await;
                 let process_group_id = probe.process_group_id;
                 let tracked_process_group_id =
                     process_group_for_change_tracking(foreground_pgid, process_group_id);
@@ -2876,6 +2938,7 @@ impl PaneRuntime {
                 let mut last_observation = (Instant::now(), Some(0));
                 let mut last_foreground_pgid = None;
                 let mut has_process_probe = false;
+                let mut last_shell_command = None;
                 let mut acquisition_started_at = None;
                 let mut last_content_change_at = None;
                 let mut pending_foreground_shell_clear = false;
@@ -3018,6 +3081,13 @@ impl PaneRuntime {
                         has_process_probe = true;
                         if pid > 0 {
                             let probe = probe_foreground_process(pid, foreground_pgid);
+                            publish_shell_command_observation(
+                                &state_events,
+                                pane_id,
+                                &mut last_shell_command,
+                                probe.ordinary_command.clone(),
+                            )
+                            .await;
                             let process_name = probe.process_name;
                             let process_group_id = probe.process_group_id;
                             let tracked_process_group_id = process_group_for_change_tracking(
@@ -5875,6 +5945,59 @@ mod tests {
             ),
             ForegroundShellAgentAction::ClearAgent
         );
+    }
+
+    #[test]
+    fn ordinary_tasks_require_confirmed_non_shell_foreground_job() {
+        let job = |pgid, name| crate::platform::ForegroundJob {
+            process_group_id: pgid,
+            processes: vec![foreground_process(pgid, name)],
+        };
+        assert_eq!(
+            ordinary_foreground_command(10, &job(20, "sleep")),
+            Some("sleep".to_owned())
+        );
+        assert_eq!(ordinary_foreground_command(10, &job(10, "zsh")), None);
+        assert_eq!(ordinary_foreground_command(10, &job(20, "bash")), None);
+        let missing = crate::platform::ForegroundJob {
+            process_group_id: 20,
+            processes: Vec::new(),
+        };
+        assert_eq!(ordinary_foreground_command(10, &missing), None);
+        let agent_job = job(20, "claude");
+        let probe = probe_foreground_process_from_jobs(
+            10,
+            Some(20),
+            Some(agent_job.clone()),
+            || Some(agent_job),
+            |_| None,
+        );
+        assert_eq!(probe.ordinary_command, None);
+        assert_eq!(probe.agent, Some(Agent::Claude));
+    }
+
+    #[tokio::test]
+    async fn ordinary_task_observations_publish_changes_and_clear_when_shell_returns() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let pane_id = PaneId::from_raw(987654);
+        let mut previous = None;
+        publish_shell_command_observation(&tx, pane_id, &mut previous, Some("sleep".to_owned()))
+            .await;
+        publish_shell_command_observation(&tx, pane_id, &mut previous, Some("sleep".to_owned()))
+            .await;
+        publish_shell_command_observation(&tx, pane_id, &mut previous, None).await;
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(AppEvent::ShellCommandObserved {
+                command: Some(_),
+                ..
+            })
+        ));
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(AppEvent::ShellCommandObserved { command: None, .. })
+        ));
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

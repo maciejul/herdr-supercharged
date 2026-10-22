@@ -8,6 +8,11 @@ pub struct PaneState {
     /// Whether the user has seen this pane since its last state change to Idle.
     /// False = "Done" (agent finished while user was in another workspace).
     pub seen: bool,
+    /// Server-owned inactivity deadline anchor; reset when this pane is read.
+    pub(crate) unread_since: Option<std::time::Instant>,
+    /// Retain this pane while its resumable agent process is stopped.
+    pub(crate) suspended: bool,
+    pub(crate) suspension_exit_pending: bool,
     /// Whether unmodified right-click gestures should be forwarded to the pane application.
     pub right_click_passthrough: bool,
 }
@@ -17,6 +22,9 @@ impl PaneState {
         Self {
             attached_terminal_id,
             seen: true,
+            unread_since: None,
+            suspended: false,
+            suspension_exit_pending: false,
             right_click_passthrough: false,
         }
     }

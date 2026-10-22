@@ -14,7 +14,9 @@ pub(super) struct AgentRow {
     pub(super) pane_id: String,
     pub(super) status: crate::api::schema::AgentStatus,
     pub(super) focused: bool,
+    pub(super) activity_only: bool,
     pub(super) rows: Vec<Vec<crate::ui::ResolvedToken>>,
+    pub(super) activity: super::background_activity::BackgroundActivity,
 }
 
 pub(super) fn ordered_agent_pane_ids(
@@ -49,12 +51,33 @@ pub(super) fn ordered_agent_pane_ids(
         .collect()
 }
 
+pub(super) fn visible_agent_pane_ids(
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+) -> Vec<String> {
+    ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
+        .into_iter()
+        .filter(|pane_id| {
+            config
+                .preferences
+                .customization
+                .include_terminal_shell_tasks
+                || !snapshot.agents.iter().any(|agent| {
+                    agent.pane_id == *pane_id
+                        && super::background_activity::activity_only(&agent.tokens)
+                })
+        })
+        .collect()
+}
+
 pub(super) fn render_agent_panel(
     buffer: &mut Buffer,
     area: Rect,
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    expanded: &HashSet<(ClientEndpointId, String)>,
+    offsets: &HashMap<(ClientEndpointId, String), usize>,
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -79,10 +102,20 @@ pub(super) fn render_agent_panel(
         config,
         agent_scroll,
         hits,
-        |row| row.rows.len(),
+        |row| row.line_count(expanded.contains(&(ClientEndpointId::Local, row.pane_id.clone()))),
+        |row| row.status,
         |buffer, rect, row, hits| {
-            hits.agents.push((rect, row.pane_id.clone()));
-            render_agent_row(buffer, rect, row, config);
+            let parent = render_agent_with_activity(
+                buffer,
+                rect,
+                row,
+                &ClientEndpointId::Local,
+                expanded,
+                offsets,
+                config,
+                hits,
+            );
+            hits.agents.push((parent, row.pane_id.clone()));
         },
     );
 }
@@ -160,6 +193,7 @@ pub(super) fn render_agent_list<T>(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
     row_lines: impl Fn(&T) -> usize,
+    row_status: impl Fn(&T) -> crate::api::schema::AgentStatus,
     mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
 ) {
     let body = Rect::new(
@@ -186,9 +220,28 @@ pub(super) fn render_agent_list<T>(
         return;
     }
 
+    let section_labels = rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            agent_section_start(
+                index
+                    .checked_sub(1)
+                    .map(|previous| row_status(&rows[previous])),
+                row_status(row),
+                body.height,
+                config.preferences.customization.show_agent_status_dividers,
+            )
+            .then(|| agent_section_label(row_status(row)))
+        })
+        .collect::<Vec<_>>();
     let row_heights = rows
         .iter()
-        .map(|row| row_lines(row).max(1).min(u16::MAX as usize) as u16)
+        .enumerate()
+        .map(|(index, row)| {
+            (row_lines(row).max(1).min(u16::MAX as usize) as u16)
+                .saturating_add(u16::from(section_labels[index].is_some()))
+        })
         .collect::<Vec<_>>();
     let gaps = rows
         .iter()
@@ -216,7 +269,28 @@ pub(super) fn render_agent_list<T>(
         if y.saturating_add(height) > body.bottom() {
             break;
         }
-        let rect = Rect::new(body.x, y, content_width, height);
+        let header = u16::from(section_labels[index].is_some());
+        if let Some(label) = section_labels[index] {
+            let title = format!(" ── {label} ");
+            let line = format!(
+                "{title}{}",
+                "─".repeat(usize::from(content_width).saturating_sub(display_width(&title)))
+            );
+            put_text(
+                buffer,
+                body.x,
+                y,
+                content_width,
+                &line,
+                Style::default().fg(config.palette.overlay0),
+            );
+        }
+        let rect = Rect::new(
+            body.x,
+            y.saturating_add(header),
+            content_width,
+            height.saturating_sub(header),
+        );
         render_row(buffer, rect, row, hits);
         y = y
             .saturating_add(height)
@@ -234,12 +308,32 @@ pub(super) fn render_agent_list<T>(
     }
 }
 
+fn agent_section_label(status: crate::api::schema::AgentStatus) -> &'static str {
+    use crate::api::schema::AgentStatus;
+    match status {
+        AgentStatus::Working => "working",
+        AgentStatus::Done => "unread",
+        AgentStatus::Idle => "idle",
+        AgentStatus::Blocked => "needs input",
+        AgentStatus::Unknown => "unknown",
+    }
+}
+
+pub(super) fn agent_section_start(
+    previous: Option<crate::api::schema::AgentStatus>,
+    current: crate::api::schema::AgentStatus,
+    body_height: u16,
+    enabled: bool,
+) -> bool {
+    enabled && body_height >= 3 && previous != Some(current)
+}
+
 pub(super) fn agent_rows(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     machine: Option<&str>,
 ) -> Vec<AgentRow> {
-    ordered_agent_pane_ids(snapshot, config.agent_panel_sort)
+    visible_agent_pane_ids(snapshot, config)
         .into_iter()
         .filter_map(|pane_id| agent_row(snapshot, &pane_id, config, machine))
         .collect()
@@ -255,6 +349,14 @@ pub(super) fn agent_row(
         .agents
         .iter()
         .find(|agent| agent.pane_id == pane_id)?;
+    if super::background_activity::activity_only(&agent.tokens)
+        && !config
+            .preferences
+            .customization
+            .include_terminal_shell_tasks
+    {
+        return None;
+    }
     let workspace = snapshot
         .workspaces
         .iter()
@@ -314,7 +416,13 @@ pub(super) fn agent_row(
         pane_id: agent.pane_id.clone(),
         status: agent.agent_status,
         focused: agent.focused,
+        activity_only: super::background_activity::activity_only(&agent.tokens),
         rows,
+        activity: if config.preferences.customization.show_agent_activity {
+            super::background_activity::BackgroundActivity::for_agent(agent, config)
+        } else {
+            Default::default()
+        },
     })
 }
 
@@ -339,11 +447,21 @@ pub(super) fn render_agent_row(
             .fg(palette.subtext0)
             .add_modifier(Modifier::BOLD)
     };
-    let status_style = Style::default().fg(status_color(row.status, palette));
+    let icon_style = if row.activity_only {
+        Style::default().fg(config
+            .preferences
+            .customization
+            .colors
+            .background_tasks
+            .color())
+    } else {
+        config.status_icon_style(row.status)
+    };
+    let status_style = Style::default().fg(icon_style.fg.unwrap_or(palette.text));
     let secondary = Style::default().fg(palette.overlay0);
     let icon = (
         status_icon(row.status, config.status_indicators),
-        Style::default().fg(status_color(row.status, palette)),
+        icon_style,
     );
     let rows = if row.rows.is_empty() {
         vec![vec![crate::ui::ResolvedToken {
@@ -392,5 +510,118 @@ fn sidebar_status_text(status: crate::api::schema::AgentStatus) -> &'static str 
         AgentStatus::Done => "done",
         AgentStatus::Working => "working",
         AgentStatus::Idle | AgentStatus::Unknown => "idle",
+    }
+}
+
+impl AgentRow {
+    pub(super) fn line_count(&self, expanded: bool) -> usize {
+        self.rows.len().max(1) + self.activity.lines(expanded)
+    }
+}
+
+pub(super) fn render_agent_with_activity(
+    buffer: &mut Buffer,
+    rect: Rect,
+    row: &AgentRow,
+    endpoint: &ClientEndpointId,
+    expanded: &HashSet<(ClientEndpointId, String)>,
+    offsets: &HashMap<(ClientEndpointId, String), usize>,
+    config: &ClientShellConfig,
+    hits: &mut ShellHitMap,
+) -> Rect {
+    let parent_height = row.rows.len().max(1).min(rect.height as usize) as u16;
+    let parent = Rect::new(rect.x, rect.y, rect.width, parent_height);
+    render_agent_row(buffer, parent, row, config);
+    let activity_rect = Rect::new(
+        rect.x,
+        rect.y + parent_height,
+        rect.width,
+        rect.height.saturating_sub(parent_height),
+    );
+    if !activity_rect.is_empty() && !row.activity.items.is_empty() {
+        let is_expanded = expanded.contains(&(endpoint.clone(), row.pane_id.clone()));
+        let visible = usize::from(activity_rect.height.saturating_sub(1));
+        let max_offset = row.activity.items.len().saturating_sub(visible);
+        let offset = offsets
+            .get(&(endpoint.clone(), row.pane_id.clone()))
+            .copied()
+            .unwrap_or(0)
+            .min(max_offset);
+        row.activity
+            .render(buffer, activity_rect, is_expanded, offset, config);
+        if is_expanded && visible > 0 && max_offset > 0 {
+            hits.background_activity_scroll.push((
+                activity_rect,
+                endpoint.clone(),
+                row.pane_id.clone(),
+                max_offset,
+            ));
+        }
+        hits.background_activity.push((
+            Rect::new(activity_rect.x, activity_rect.y, activity_rect.width, 1),
+            endpoint.clone(),
+            row.pane_id.clone(),
+        ));
+    }
+    parent
+}
+
+#[cfg(test)]
+mod section_tests {
+    use super::*;
+    #[test]
+    fn agent_sections_label_states_without_stealing_click_targets() {
+        use crate::api::schema::AgentStatus;
+        for enabled in [true, false] {
+            let mut config = ClientShellConfig::from_config(&Config::default());
+            config.preferences.customization.show_agent_status_dividers = enabled;
+            let rows = [AgentStatus::Working, AgentStatus::Done, AgentStatus::Idle]
+                .into_iter()
+                .enumerate()
+                .map(|(index, status)| AgentRow {
+                    pane_id: format!("pane_{index}"),
+                    status,
+                    focused: false,
+                    activity_only: false,
+                    rows: vec![],
+                    activity: Default::default(),
+                })
+                .collect::<Vec<_>>();
+            let area = Rect::new(0, 0, 30, 20);
+            let mut buffer = Buffer::empty(area);
+            let mut hits = ShellHitMap::default();
+            let mut scroll = 0;
+            render_agent_list(
+                &mut buffer,
+                area,
+                &rows,
+                None,
+                &config,
+                &mut scroll,
+                &mut hits,
+                |_| 1,
+                |row| row.status,
+                |buffer, rect, row, hits| {
+                    render_agent_row(buffer, rect, row, &config);
+                    hits.agents.push((rect, row.pane_id.clone()));
+                },
+            );
+            let text = buffer
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert_eq!(text.contains("── working"), enabled);
+            assert_eq!(text.contains("── unread"), enabled);
+            assert_eq!(text.contains("── idle"), enabled);
+            assert_eq!(hits.agents.len(), 3);
+            for (rect, _) in hits.agents {
+                assert_eq!(rect.height, 1);
+                assert_ne!(buffer[(rect.x + 1, rect.y)].symbol(), "─");
+                if enabled {
+                    assert_eq!(buffer[(rect.x + 1, rect.y - 1)].symbol(), "─");
+                }
+            }
+        }
     }
 }

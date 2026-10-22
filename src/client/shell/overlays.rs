@@ -67,9 +67,15 @@ pub(crate) fn render_client_overlay(
         ClientShellOverlay::Navigator(v) => {
             render_navigator_overlay(b, v, endpoints, active_endpoint_id, p)
         }
-        ClientShellOverlay::Settings(v) => {
-            settings_overlay::render_settings_overlay(b, v, s.integration_updates_available, p)
-        }
+        ClientShellOverlay::Settings(v) => settings_overlay::render_settings_overlay(
+            b,
+            v,
+            s.integration_updates_available,
+            super::settings::background_tracking_enabled(Some(s)),
+            super::settings::unread_suspend_delay(Some(s)).map(|(_, label)| label),
+            &v.customization,
+            p,
+        ),
         ClientShellOverlay::WorktreeCreate(v) => {
             worktree_overlays::render_worktree_create_overlay(b, v, p)
         }
@@ -165,9 +171,10 @@ pub(crate) fn render_global_menu(
 pub(crate) fn render_context_menu(
     buffer: &mut Buffer,
     menu: &ClientContextMenuOverlay,
+    groups_enabled: bool,
     palette: &Palette,
 ) -> Option<OverlayRender> {
-    let items = menu.items();
+    let items = menu.items(groups_enabled);
     let screen = buffer.area;
     let max_item_width = items
         .iter()
@@ -646,7 +653,19 @@ fn render_rename_overlay(
     v: &ClientRenameOverlay,
     p: &Palette,
 ) -> Option<OverlayRender> {
-    let q = popup(b.area, 56, 7)?;
+    let choices = match &v.target {
+        ClientRenameTarget::SpaceGroup { choices, .. } => choices.as_slice(),
+        _ => &[],
+    };
+    let visible = choices
+        .len()
+        .min(6)
+        .min(b.area.height.saturating_sub(9) as usize);
+    let q = popup(
+        b.area,
+        56,
+        7 + if visible > 0 { visible as u16 + 1 } else { 0 },
+    )?;
     let i = panel(b, q, p.accent, p.panel_bg)?;
     put_text(
         b,
@@ -667,7 +686,37 @@ fn render_rename_overlay(
         &v.input,
         Style::default().fg(p.text).bg(p.surface0),
     );
-    let rs = row(i, &[8, 10, 12], 2, 3);
+    if visible > 0 {
+        let selected = choices.iter().position(|choice| choice == v.input.trim());
+        let start = selected.unwrap_or(0).saturating_sub(visible - 1);
+        put_text(
+            b,
+            i.x,
+            i.y + 3,
+            i.width,
+            "↑/↓ choose a group · type to create new",
+            Style::default().fg(p.overlay1),
+        );
+        for (index, choice) in choices.iter().enumerate().skip(start).take(visible) {
+            let selected = selected == Some(index);
+            put_text(
+                b,
+                i.x,
+                i.y + 4 + (index - start) as u16,
+                i.width,
+                &format!("{} {}", if selected { "›" } else { " " }, choice),
+                Style::default()
+                    .fg(if selected { p.accent } else { p.text })
+                    .bg(if selected { p.surface1 } else { p.panel_bg }),
+            );
+        }
+    }
+    let rs = row(
+        i,
+        &[8, 10, 12],
+        2,
+        3 + if visible > 0 { visible as u16 + 1 } else { 0 },
+    );
     let [save, clear, cancel] = rs.as_slice() else {
         return None;
     };

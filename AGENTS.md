@@ -2,6 +2,55 @@
 
 Terminal based agent runtime for coding agents.
 
+## Private supercharged customization
+
+This checkout belongs to `Maciejul/herdr-supercharged`, a **private standalone
+repository**, detached from GitHub's fork network. `origin` is our private repo;
+`upstream` is the public `herdrdev/herdr`. The integration branch is `master`.
+Our customization work is authorized here; upstream maintainer/contribution
+rules below govern interactions with the public project, not our private work.
+Preserve the universal architecture and code conventions below.
+
+For manual upstream updates, run `./scripts/sync-upstream.sh` from a clean
+`master`. It checks remote destinations, fetches private changes, fast-forwards
+when necessary, and merges `upstream/master`, preserving our custom commits.
+It stops on divergence from origin or merge conflicts; resolve deliberately,
+or use `git merge --abort` for an in-progress merge. Review and test the result,
+then `git push origin master`. `--push` combines merge and push when explicitly
+requested; it does not run tests. The script never pushes upstream or force-pushes.
+
+On a fresh clone, add `upstream` with
+`git remote add upstream https://github.com/herdrdev/herdr.git` and set
+`git config remote.pushDefault origin`. Keep private changes on `origin`.
+GitHub Actions were disabled during import; review inherited workflows and
+their publishing destinations before enabling them. During upstream merges,
+preserve this section and `scripts/sync-upstream.sh`. `CLAUDE.md` is a symlink
+to this file, so edit this single source of truth.
+
+Private UI customization: unseen `Done` dots and tab labels pulse the configured
+completion color. `src/client/shell/completion_glow.rs` owns the client animation;
+preserve upstream completion/seen semantics. Sidebar symbol mode stays static;
+tab-label glow is independent. Restrict animation to visible chrome and never
+modify terminal pane contents.
+Agent divider rows must share scroll/reveal geometry with their agent rows.
+Personal Space groups live in client preferences (`space_groups.rs`), with
+endpoint-scoped membership; ungrouping must never close server workspaces.
+`automatic_names.rs` derives Claude/Codex labels from supplied metadata and
+preserves manual labels. These are client UI features, not protocol changes.
+Tracking preferences in Settings distinguish client display choices from the
+machine-wide integration toggle, which must confirm adding/removing hooks.
+Preserve session-resume and unrelated hooks. Activity travels through bounded
+metadata tokens; ordinary-shell facts come from existing runtime process probes,
+never renderer process queries. See the private customization notes in
+`docs/next/website/src/content/docs/configuration.mdx` for the supported options.
+
+Launch the development build with `herdr-test` (a local symlink to
+`scripts/herdr-test.sh`). It uses `target/debug/herdr` and the named `herdr-test`
+session, clearing inherited socket overrides. Build with `scripts/build-test.sh`
+or run `herdr-test --build`; this needs the pinned Rust toolchain and Zig 0.16.0. The normal
+installed `herdr` stays separate. Use an external terminal if nested Herdr is
+disabled. This launcher is for the local Linux development environment.
+
 ## Scope and Audience
 
 These instructions are layered.

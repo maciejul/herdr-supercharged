@@ -968,14 +968,19 @@ fn install_claude_writes_hook_and_updates_settings() {
         .unwrap()
         .contains(" session"));
     assert!(settings["hooks"].get("UserPromptSubmit").is_none());
-    assert!(settings["hooks"].get("PreToolUse").is_none());
+    assert_eq!(settings["hooks"].get("PreToolUse").is_some(), cfg!(unix));
     assert!(settings["hooks"].get("PermissionRequest").is_none());
-    assert!(settings["hooks"].get("PostToolUse").is_none());
-    assert!(settings["hooks"].get("PostToolUseFailure").is_none());
-    assert!(settings["hooks"].get("SubagentStop").is_none());
-    assert!(settings["hooks"].get("Stop").is_none());
-    assert!(settings["hooks"].get("SessionEnd").is_none());
+    assert_eq!(settings["hooks"].get("PostToolUse").is_some(), cfg!(unix));
+    assert_eq!(
+        settings["hooks"].get("PostToolUseFailure").is_some(),
+        cfg!(unix)
+    );
+    assert_eq!(settings["hooks"].get("SubagentStop").is_some(), cfg!(unix));
+    assert_eq!(settings["hooks"].get("Stop").is_some(), cfg!(unix));
+    assert_eq!(settings["hooks"].get("SessionEnd").is_some(), cfg!(unix));
 
+    assert_eq!(settings["hooks"].get("StopFailure").is_some(), cfg!(unix));
+    assert!(settings["hooks"].get("Interrupt").is_none());
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
 }
@@ -1017,17 +1022,22 @@ fn install_claude_is_idempotent_for_hook_entries() {
             .unwrap();
     assert_eq!(
         settings["hooks"]["SessionStart"].as_array().unwrap().len(),
-        1
+        1 + usize::from(cfg!(unix))
     );
     assert!(settings["hooks"].get("UserPromptSubmit").is_none());
-    assert!(settings["hooks"].get("PreToolUse").is_none());
+    assert_eq!(settings["hooks"].get("PreToolUse").is_some(), cfg!(unix));
     assert!(settings["hooks"].get("PermissionRequest").is_none());
-    assert!(settings["hooks"].get("PostToolUse").is_none());
-    assert!(settings["hooks"].get("PostToolUseFailure").is_none());
-    assert!(settings["hooks"].get("SubagentStop").is_none());
-    assert!(settings["hooks"].get("Stop").is_none());
-    assert!(settings["hooks"].get("SessionEnd").is_none());
+    assert_eq!(settings["hooks"].get("PostToolUse").is_some(), cfg!(unix));
+    assert_eq!(
+        settings["hooks"].get("PostToolUseFailure").is_some(),
+        cfg!(unix)
+    );
+    assert_eq!(settings["hooks"].get("SubagentStop").is_some(), cfg!(unix));
+    assert_eq!(settings["hooks"].get("Stop").is_some(), cfg!(unix));
+    assert_eq!(settings["hooks"].get("SessionEnd").is_some(), cfg!(unix));
 
+    assert_eq!(settings["hooks"].get("StopFailure").is_some(), cfg!(unix));
+    assert!(settings["hooks"].get("Interrupt").is_none());
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
 }
@@ -1102,8 +1112,8 @@ fn install_claude_removes_deprecated_completion_hooks_and_preserves_user_hooks()
         "echo keep-session-end"
     );
     assert!(settings["hooks"].get("UserPromptSubmit").is_none());
-    assert!(settings["hooks"].get("PreToolUse").is_none());
-    assert!(settings["hooks"].get("Stop").is_none());
+    assert_eq!(settings["hooks"].get("PreToolUse").is_some(), cfg!(unix));
+    assert_eq!(settings["hooks"].get("Stop").is_some(), cfg!(unix));
 
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
@@ -1132,7 +1142,7 @@ fn claude_v9_integration_status_is_outdated_until_reinstalled() {
 
     assert_eq!(claude.path, hook_path);
     assert_eq!(claude.installed_version, Some(9));
-    assert_eq!(claude.expected_version, 11);
+    assert_eq!(claude.expected_version, CLAUDE_INTEGRATION_VERSION);
     assert_eq!(claude.state, IntegrationStatusKind::Outdated);
 
     install_claude().unwrap();
@@ -1141,7 +1151,7 @@ fn claude_v9_integration_status_is_outdated_until_reinstalled() {
         hook_path,
         CLAUDE_INTEGRATION_VERSION,
     );
-    assert_eq!(status.installed_version, Some(11));
+    assert_eq!(status.installed_version, Some(CLAUDE_INTEGRATION_VERSION));
     assert_eq!(status.state, IntegrationStatusKind::Current);
 
     std::env::remove_var("HOME");
@@ -1171,7 +1181,7 @@ fn claude_v2_integration_status_is_outdated() {
 
     assert_eq!(claude.path, hook_path);
     assert_eq!(claude.installed_version, Some(2));
-    assert_eq!(claude.expected_version, 11);
+    assert_eq!(claude.expected_version, CLAUDE_INTEGRATION_VERSION);
     assert_eq!(claude.state, IntegrationStatusKind::Outdated);
 
     std::env::remove_var("HOME");
@@ -1430,7 +1440,7 @@ fn codex_v2_integration_status_is_outdated() {
 
     assert_eq!(codex.path, hook_path);
     assert_eq!(codex.installed_version, Some(2));
-    assert_eq!(codex.expected_version, 10);
+    assert_eq!(codex.expected_version, CODEX_INTEGRATION_VERSION);
     assert_eq!(codex.state, IntegrationStatusKind::Outdated);
 
     std::env::remove_var("HOME");
@@ -1462,15 +1472,17 @@ fn install_codex_writes_hook_and_updates_hooks_and_config() {
         .unwrap()
         .contains(" session"));
     assert!(hooks["hooks"].get("UserPromptSubmit").is_none());
-    assert!(hooks["hooks"].get("PreToolUse").is_none());
+    assert_eq!(hooks["hooks"].get("PreToolUse").is_some(), cfg!(unix));
     assert!(hooks["hooks"].get("PermissionRequest").is_none());
-    assert!(hooks["hooks"].get("Stop").is_none());
-    assert!(hooks["hooks"].get("Interrupt").is_none());
+    assert_eq!(hooks["hooks"].get("Stop").is_some(), cfg!(unix));
+    assert_eq!(hooks["hooks"].get("Interrupt").is_some(), cfg!(unix));
     assert!(config.contains("model = \"gpt-5.4\""));
     assert!(config.contains("[features]"));
     assert!(config.contains("hooks = true"));
     assert!(!config.contains("codex_hooks"));
 
+    assert!(hooks["hooks"].get("PostToolUseFailure").is_none());
+    assert!(hooks["hooks"].get("StopFailure").is_none());
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
 }
@@ -1515,16 +1527,21 @@ fn install_codex_is_idempotent_for_hook_entries_and_feature_flag() {
         serde_json::from_str(&fs::read_to_string(codex_dir.join("hooks.json")).unwrap()).unwrap();
     let config = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
 
-    assert_eq!(hooks["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        hooks["hooks"]["SessionStart"].as_array().unwrap().len(),
+        1 + usize::from(cfg!(unix))
+    );
     assert!(hooks["hooks"].get("UserPromptSubmit").is_none());
-    assert!(hooks["hooks"].get("PreToolUse").is_none());
+    assert_eq!(hooks["hooks"].get("PreToolUse").is_some(), cfg!(unix));
     assert!(hooks["hooks"].get("PermissionRequest").is_none());
-    assert!(hooks["hooks"].get("Stop").is_none());
-    assert!(hooks["hooks"].get("Interrupt").is_none());
+    assert_eq!(hooks["hooks"].get("Stop").is_some(), cfg!(unix));
+    assert_eq!(hooks["hooks"].get("Interrupt").is_some(), cfg!(unix));
     assert_eq!(config.matches("hooks = true").count(), 1);
     assert!(!config.contains("codex_hooks"));
     assert!(config.contains("other = true"));
 
+    assert!(hooks["hooks"].get("PostToolUseFailure").is_none());
+    assert!(hooks["hooks"].get("StopFailure").is_none());
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
 }
@@ -1585,14 +1602,19 @@ fn install_codex_removes_turn_status_hooks_from_previous_integration() {
 
     let hooks: Value =
         serde_json::from_str(&fs::read_to_string(codex_dir.join("hooks.json")).unwrap()).unwrap();
-    assert_eq!(hooks["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        hooks["hooks"]["SessionStart"].as_array().unwrap().len(),
+        1 + usize::from(cfg!(unix))
+    );
     assert_eq!(
         hooks["hooks"]["UserPromptSubmit"][0]["hooks"],
         json!([{"type": "command", "command": "echo keep", "timeout": 10}])
     );
-    assert!(hooks["hooks"].get("Stop").is_none());
-    assert!(hooks["hooks"].get("Interrupt").is_none());
+    assert_eq!(hooks["hooks"].get("Stop").is_some(), cfg!(unix));
+    assert_eq!(hooks["hooks"].get("Interrupt").is_some(), cfg!(unix));
 
+    assert!(hooks["hooks"].get("PostToolUseFailure").is_none());
+    assert!(hooks["hooks"].get("StopFailure").is_none());
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
 }
@@ -3119,7 +3141,12 @@ fn hermes_block_sequences_preserve_indentation_comments_and_siblings() {
             "plugins: # selected\n# keep comment\n{padding}- other-plugin\nmodel: example\n"
         );
         let installed = update_hermes_enabled_plugin(&input, true);
-        assert_eq!(installed, format!("plugins: # selected\n{padding}- herdr-agent-state\n# keep comment\n{padding}- other-plugin\nmodel: example\n"));
+        assert_eq!(
+            installed,
+            format!(
+                "plugins: # selected\n{padding}- herdr-agent-state\n# keep comment\n{padding}- other-plugin\nmodel: example\n"
+            )
+        );
         assert_eq!(update_hermes_enabled_plugin(&installed, true), installed);
         assert_eq!(update_hermes_enabled_plugin(&installed, false), input);
     }
@@ -3151,7 +3178,10 @@ fn hermes_sequence_membership_is_scoped_to_direct_enabled_items() {
 fn install_hermes_does_not_treat_disabled_as_a_flat_plugin_list() {
     let input = "plugins:\n    disabled:\n    - herdr-agent-state\nmodel: example\n";
     let installed = update_hermes_enabled_plugin(input, true);
-    assert_eq!(installed, "plugins:\n    enabled:\n      - herdr-agent-state\n    disabled:\n    - herdr-agent-state\nmodel: example\n");
+    assert_eq!(
+        installed,
+        "plugins:\n    enabled:\n      - herdr-agent-state\n    disabled:\n    - herdr-agent-state\nmodel: example\n"
+    );
     assert_eq!(update_hermes_enabled_plugin(&installed, true), installed);
     let uninstalled = update_hermes_enabled_plugin(&installed, false);
     assert_eq!(
@@ -3167,13 +3197,25 @@ fn install_hermes_does_not_treat_disabled_as_a_flat_plugin_list() {
 #[test]
 fn uninstall_hermes_keeps_empty_sequences_and_removes_duplicate_direct_items() {
     for (input, expected) in [
-        ("plugins:\n  enabled: # keep\n  - 'herdr-agent-state'\n  - herdr-agent-state # duplicate\n  disabled: []\n", "plugins:\n  enabled: [] # keep\n  disabled: []\n"),
-        ("plugins: # keep\n- herdr-agent-state\n", "plugins: [] # keep\n"),
-        ("plugins:\n    enabled: [herdr-agent-state, herdr-agent-state] # keep\n", "plugins:\n    enabled: [] # keep\n"),
+        (
+            "plugins:\n  enabled: # keep\n  - 'herdr-agent-state'\n  - herdr-agent-state # duplicate\n  disabled: []\n",
+            "plugins:\n  enabled: [] # keep\n  disabled: []\n",
+        ),
+        (
+            "plugins: # keep\n- herdr-agent-state\n",
+            "plugins: [] # keep\n",
+        ),
+        (
+            "plugins:\n    enabled: [herdr-agent-state, herdr-agent-state] # keep\n",
+            "plugins:\n    enabled: [] # keep\n",
+        ),
     ] {
         let uninstalled = update_hermes_enabled_plugin(input, false);
         assert_eq!(uninstalled, expected);
-        assert_eq!(update_hermes_enabled_plugin(&uninstalled, false), uninstalled);
+        assert_eq!(
+            update_hermes_enabled_plugin(&uninstalled, false),
+            uninstalled
+        );
     }
 }
 
@@ -3319,8 +3361,14 @@ fn hermes_does_not_match_scalar_prefixes_or_nested_continuations() {
 #[test]
 fn hermes_flow_sequence_edits_keep_following_comments() {
     for (input, expected) in [
-        ("plugins: [other] # selected\n# keep following comment\nmodel: example\n", "plugins: # selected\n  - herdr-agent-state\n  - other\n# keep following comment\nmodel: example\n"),
-        ("plugins:\n    enabled: [other] # selected\n    # keep following comment\n    disabled: []\n", "plugins:\n    enabled: # selected\n      - herdr-agent-state\n      - other\n    # keep following comment\n    disabled: []\n"),
+        (
+            "plugins: [other] # selected\n# keep following comment\nmodel: example\n",
+            "plugins: # selected\n  - herdr-agent-state\n  - other\n# keep following comment\nmodel: example\n",
+        ),
+        (
+            "plugins:\n    enabled: [other] # selected\n    # keep following comment\n    disabled: []\n",
+            "plugins:\n    enabled: # selected\n      - herdr-agent-state\n      - other\n    # keep following comment\n    disabled: []\n",
+        ),
     ] {
         assert_eq!(update_hermes_enabled_plugin(input, true), expected);
         assert_eq!(update_hermes_enabled_plugin(expected, true), expected);
@@ -3339,7 +3387,10 @@ fn hermes_install_and_uninstall_are_idempotent_with_indentless_config() {
 
     let installed = install_hermes().unwrap();
     let first = fs::read_to_string(&config_path).unwrap();
-    assert_eq!(first, "plugins:\n  enabled:\n  - herdr-agent-state\n  - example-plugin\n  disabled:\n  - other-plugin\n");
+    assert_eq!(
+        first,
+        "plugins:\n  enabled:\n  - herdr-agent-state\n  - example-plugin\n  disabled:\n  - other-plugin\n"
+    );
     assert!(installed
         .plugin_dir
         .join(HERMES_PLUGIN_INIT_INSTALL_NAME)
@@ -5189,5 +5240,110 @@ fn grok_dir_honors_grok_home_after_config_dir_seam() {
 
     std::env::remove_var(GROK_HOME_ENV_VAR);
     clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn background_companion_install_uninstall_preserves_foreign_hooks() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let claude_dir = home.join(".claude");
+    let codex_dir = home.join(".codex");
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::create_dir_all(&codex_dir).unwrap();
+    let source =
+        r#"{"hooks":{"SubagentStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}"#;
+    fs::write(claude_dir.join("settings.json"), source).unwrap();
+    fs::write(codex_dir.join("hooks.json"), source).unwrap();
+    std::env::set_var("HOME", &home);
+    let claude = install_claude().unwrap();
+    let codex = install_codex().unwrap();
+    for hook in [&claude.hook_path, &codex.hook_path] {
+        assert!(hook
+            .with_file_name("herdr-background-activity.py")
+            .is_file());
+    }
+    uninstall_claude().unwrap();
+    uninstall_codex().unwrap();
+    for (hook, config) in [
+        (&claude.hook_path, &claude.settings_path),
+        (&codex.hook_path, &codex.hooks_path),
+    ] {
+        assert!(!hook.with_file_name("herdr-background-activity.py").exists());
+        let actual: Value = serde_json::from_str(&fs::read_to_string(config).unwrap()).unwrap();
+        assert_eq!(actual, serde_json::from_str::<Value>(source).unwrap());
+    }
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn background_tracking_toggle_persists_disabled_across_reinstall_and_preserves_resume() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    fs::create_dir_all(home.join(".codex")).unwrap();
+    std::env::set_var("HOME", &home);
+    let claude = install_claude().unwrap();
+    let codex = install_codex().unwrap();
+    assert_eq!(background_tracking_enabled(), Some(true));
+    set_background_tracking_enabled(false).unwrap();
+    assert_eq!(background_tracking_enabled(), Some(false));
+    install_claude().unwrap();
+    install_codex().unwrap();
+    for (config, hook) in [
+        (&claude.settings_path, &claude.hook_path),
+        (&codex.hooks_path, &codex.hook_path),
+    ] {
+        let content = fs::read_to_string(config).unwrap();
+        assert!(!content.contains("herdr-background-activity.py"));
+        assert!(content.contains(" session"));
+        assert!(hook
+            .with_file_name("herdr-background-activity.py.disabled")
+            .exists());
+    }
+    assert_eq!(background_tracking_enabled(), Some(false));
+    set_background_tracking_enabled(true).unwrap();
+    assert_eq!(background_tracking_enabled(), Some(true));
+    for hook in [&claude.hook_path, &codex.hook_path] {
+        assert!(!hook
+            .with_file_name("herdr-background-activity.py.disabled")
+            .exists());
+        assert!(hook
+            .with_file_name("herdr-background-activity.py.generation")
+            .exists());
+    }
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn background_tracking_preflights_all_targets_before_mutation() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    fs::create_dir_all(home.join(".codex")).unwrap();
+    std::env::set_var("HOME", &home);
+    let claude = install_claude().unwrap();
+    let codex = install_codex().unwrap();
+    let before = fs::read(&claude.settings_path).unwrap();
+    fs::write(&codex.hooks_path, "not JSON").unwrap();
+    assert!(set_background_tracking_enabled(false).is_err());
+    assert_eq!(fs::read(&claude.settings_path).unwrap(), before);
+    assert!(!claude
+        .hook_path
+        .with_file_name("herdr-background-activity.py.disabled")
+        .exists());
+    assert!(!codex
+        .hook_path
+        .with_file_name("herdr-background-activity.py.disabled")
+        .exists());
+    std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
 }

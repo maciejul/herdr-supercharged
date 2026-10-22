@@ -310,6 +310,10 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
         }),
         ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay { highlighted: 0 }),
         ClientShellOverlay::Settings(ClientSettingsOverlay {
+            customization: super::super::preferences::CustomizationPreferences::default(),
+            tracking_confirmation: None,
+            tracking_pending: false,
+            tracking_message: None,
             section: ClientSettingsSection::Theme,
             selected: 0,
             original_theme_name: String::new(),
@@ -330,7 +334,7 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
         let snapshot = state.snapshot.as_deref().unwrap();
         let rendered = match &overlay {
             ClientShellOverlay::ContextMenu(menu) => {
-                render::render_context_menu(&mut buffer, menu, &state.config.palette)
+                render::render_context_menu(&mut buffer, menu, true, &state.config.palette)
             }
             ClientShellOverlay::GlobalMenu(menu) => render::render_global_menu(
                 &mut buffer,

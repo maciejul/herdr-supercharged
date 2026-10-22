@@ -83,6 +83,11 @@ pub enum AppEvent {
     },
     /// A worktree-removal runtime could not be restored normally.
     WorktreeRuntimeRestoreFailed { pane_id: PaneId, operation_id: u64 },
+    /// A confirmed foreground job in an ordinary terminal started or stopped.
+    ShellCommandObserved {
+        pane_id: PaneId,
+        command: Option<String>,
+    },
     /// Process detection identified an agent before its screen state was confirmed.
     AgentProcessDetected {
         pane_id: PaneId,

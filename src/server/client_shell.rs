@@ -121,19 +121,37 @@ pub(super) fn snapshot_with_completions(
             }
         })
         .collect();
+    let mut shell_tasks = Vec::new();
+    let agent_panes = snapshot
+        .agents
+        .iter()
+        .map(|agent| agent.pane_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
     let panes = snapshot
         .panes
         .into_iter()
         .map(|pane| {
+            let public_pane_id = pane.pane_id.clone();
             let pane_id = pane.pane_id;
             let focused = focused_pane_id.as_deref() == Some(pane_id.as_str());
             let right_click_passthrough = app
                 .parse_pane_id(&pane_id)
                 .and_then(|(workspace_index, pane_id)| {
-                    app.state
-                        .workspaces
-                        .get(workspace_index)?
-                        .pane_state(pane_id)
+                    let pane_state = app.state.workspaces.get(workspace_index)?.pane_state(pane_id)?;
+                    if !app.background_tracking_disabled() && !agent_panes.contains(public_pane_id.as_str()) {
+                        let terminal = app.state.terminals.get(&pane_state.attached_terminal_id);
+                        if let Some(command) = terminal.filter(|terminal| terminal.effective_agent_label().is_none()).and_then(|terminal| terminal.active_shell_command.as_deref()) {
+                            let activity = serde_json::json!({"items":[{"id":format!("shell:{}", public_pane_id),"kind":"task","label":command}]}).to_string();
+                            shell_tasks.push(protocol::ClientShellAgent {
+                                pane_id: public_pane_id.clone(), workspace_id: pane.workspace_id.clone(), tab_id: pane.tab_id.clone(),
+                                name: Some("Terminal".to_owned()), display_agent: Some("Terminal".to_owned()), agent: None,
+                                title: Some(command.to_owned()), terminal_title: None, terminal_title_stripped: None,
+                                agent_status: crate::api::schema::AgentStatus::Working, state_change_seq: 0, state_labels: Vec::new(),
+                                tokens: vec![("herdr_activity_only".to_owned(), "true".to_owned()), ("herdr_background_activity".to_owned(), activity)], focused,
+                            });
+                        }
+                    }
+                    Some(pane_state)
                 })
                 .is_some_and(|pane| pane.right_click_passthrough);
             protocol::ClientShellPane {
@@ -175,6 +193,7 @@ pub(super) fn snapshot_with_completions(
                 focused,
             }
         })
+        .chain(shell_tasks)
         .collect();
 
     let agent_view_label = app
@@ -628,6 +647,96 @@ fn split_hit_rect(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore = "manual ordinary shell snapshot scaling profile"]
+    async fn ordinary_shell_snapshot_scale_profile() {
+        for count in [1, 15] {
+            let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut app = crate::app::App::new(
+                &crate::config::Config::default(),
+                crate::app::AppPolicy::TEST,
+                None,
+                api_rx,
+                crate::api::EventHub::default(),
+            );
+            app.state.workspaces = (0..count)
+                .map(|index| crate::workspace::Workspace::test_new(&format!("shell-{index}")))
+                .collect();
+            app.state.active = Some(0);
+            app.state.ensure_test_terminals();
+            for terminal in app.state.terminals.values_mut() {
+                terminal.active_shell_command = Some("sleep".to_owned());
+                app.terminal_runtimes.insert(
+                    terminal.id.clone(),
+                    crate::terminal::TerminalRuntime::test_with_screen_bytes(
+                        120,
+                        40,
+                        b"running command\r\n",
+                    ),
+                );
+            }
+            let mut samples = Vec::new();
+            for iteration in 0..105 {
+                let start = std::time::Instant::now();
+                let projected = snapshot(&app, "profile", iteration, None, None);
+                assert_eq!(projected.agents.len(), count);
+                std::hint::black_box(projected);
+                if iteration >= 5 {
+                    samples.push(start.elapsed().as_micros());
+                }
+            }
+            samples.sort_unstable();
+            println!("Ordinary shell snapshot, {count} populated command panes, 120x40: median {}us, p95 {}us", samples[50], samples[95]);
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn snapshot_exposes_only_active_ordinary_shell_tasks_without_duplicate_agents() {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &crate::config::Config::default(),
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        app.state.workspaces = vec![crate::workspace::Workspace::test_new("tasks")];
+        app.state.active = Some(0);
+        app.state.ensure_test_terminals();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        assert!(snapshot(&app, "test", 1, None, None).agents.is_empty());
+        app.state
+            .handle_app_event(crate::events::AppEvent::ShellCommandObserved {
+                pane_id,
+                command: Some("sleep".to_owned()),
+            });
+        let projected = snapshot(&app, "test", 2, None, None);
+        assert_eq!(projected.agents.len(), 1);
+        assert!(projected.agents[0]
+            .tokens
+            .iter()
+            .any(|(key, value)| key == "herdr_activity_only" && value == "true"));
+        assert_eq!(projected.agents[0].title.as_deref(), Some("sleep"));
+        app.state
+            .handle_app_event(crate::events::AppEvent::ShellCommandObserved {
+                pane_id,
+                command: None,
+            });
+        assert!(snapshot(&app, "test", 3, None, None).agents.is_empty());
+        let terminal = app.state.terminals.values_mut().next().unwrap();
+        terminal.active_shell_command = Some("sleep".to_owned());
+        terminal.set_detected_state(
+            Some(crate::detect::Agent::Claude),
+            crate::detect::AgentState::Working,
+        );
+        let projected = snapshot(&app, "test", 4, None, None);
+        assert_eq!(projected.agents.len(), 1);
+        assert!(!projected.agents[0]
+            .tokens
+            .iter()
+            .any(|(key, _)| key == "herdr_activity_only"));
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn snapshot_metadata_skips_scroll_reads_and_preserves_public_session_data() {

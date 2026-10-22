@@ -999,6 +999,10 @@ impl ClientShellState {
                     &self.endpoints,
                     &self.active_endpoint_id,
                     self.config.agent_panel_sort,
+                    self.config
+                        .preferences
+                        .customization
+                        .include_terminal_shell_tasks,
                 )
                 .get(*index)
                 .is_some()

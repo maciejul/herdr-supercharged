@@ -9,6 +9,7 @@ mod agent_resume;
 mod agent_suspend_tests;
 pub(crate) mod agent_view;
 mod agents;
+mod unread_suspend;
 pub(crate) use agents::{AGENT_START_SETTLE_DELAY, MAX_AGENT_START_TIMEOUT};
 mod api;
 #[cfg(test)]
@@ -156,6 +157,8 @@ pub struct App {
     pub(crate) persist_pane_history: bool,
     /// Last render-loop attempt, including a throttled hidden-only PTY skip.
     pub(crate) last_render_at: Option<Instant>,
+    pub(crate) unread_suspend_check_at: Option<Instant>,
+    pub(crate) unread_suspend_delay_seconds: u64,
     /// Last attempt that could update a connected presentation surface.
     pub(crate) last_presentation_at: Option<Instant>,
     pub render_notify: Arc<Notify>,
@@ -667,6 +670,12 @@ impl App {
             window_title_template: None,
             persist_pane_history: config.experimental.pane_history,
             last_render_at: None,
+            unread_suspend_check_at: None,
+            unread_suspend_delay_seconds: if policy.persist_session {
+                unread_suspend::load_delay_seconds()
+            } else {
+                unread_suspend::DEFAULT_DELAY_SECONDS
+            },
             last_presentation_at: None,
             api_rx,
             event_hub,
@@ -680,6 +689,10 @@ impl App {
             client_shell_keybindings_profile,
             endpoint_commands,
         };
+        if policy.persist_session {
+            app.refresh_background_tracking();
+        }
+
         app.configure_tab_bar_status(&config.ui.tab_bar_right, &config.ui.tab_bar_right_separator);
         app.configure_window_title(&config.ui.window_title);
         app.refresh_restored_workspace_git_metadata();
@@ -844,6 +857,11 @@ impl App {
         };
         self.endpoint_commands =
             custom_commands::EndpointCommandRegistry::new(&self.state.keybinds.custom_commands);
+        if self.policy.persist_session {
+            self.refresh_background_tracking();
+            self.unread_suspend_delay_seconds = unread_suspend::load_delay_seconds();
+            self.unread_suspend_check_at = None;
+        }
         self.sync_toast_deadline(previous_toast);
         report
     }
