@@ -152,7 +152,7 @@ impl App {
                 return crate::app::api::responses::encode_error(
                     id,
                     "command_not_found",
-                    "unread suspension setting changed; refresh and try again",
+                    "read / idle suspension setting changed; refresh and try again",
                 );
             }
             return match self.cycle_unread_suspend_delay() {

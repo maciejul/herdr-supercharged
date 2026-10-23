@@ -836,11 +836,8 @@ mod tests {
                         false,
                         &config,
                     );
-                    let expected = if replace {
-                        "Selected session"
-                    } else {
-                        "Original workspace"
-                    };
+                    // Explicit workspace labels take precedence over the optional tab substitution.
+                    let expected = "Original workspace";
                     assert!(rows.iter().flatten().any(|token| matches!(&token.kind, crate::ui::ResolvedTokenKind::Workspace(label) if label == expected)));
                     assert_eq!(rows.iter().flatten().any(|token| matches!(&token.kind, crate::ui::ResolvedTokenKind::Tab(label) if label == "Selected session")), below);
                     let mut state = ClientShellState::new(config);

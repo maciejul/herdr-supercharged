@@ -457,7 +457,9 @@ impl Workspace {
             if let Some(tab) = self.tabs.get_mut(idx) {
                 for pane in tab.panes.values_mut() {
                     pane.seen = true;
+                    pane.suspended_resume_requested = pane.suspended;
                     pane.unread_since = None;
+                    pane.suspension_reset_at = Some(std::time::Instant::now());
                 }
             }
         }

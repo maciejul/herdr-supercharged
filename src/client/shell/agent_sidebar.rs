@@ -80,17 +80,18 @@ pub(super) fn render_agent_panel(
     offsets: &HashMap<(ClientEndpointId, String), usize>,
     hits: &mut ShellHitMap,
 ) {
+    let rows = agent_rows(snapshot, config, None);
     if !render_agent_panel_header(
         buffer,
         area,
         snapshot.agent_view_label.as_deref(),
+        rows.iter().filter(|row| !row.activity_only).count(),
         config,
         hits,
     ) {
         return;
     }
 
-    let rows = agent_rows(snapshot, config, None);
     render_agent_list(
         buffer,
         area,
@@ -124,6 +125,7 @@ pub(super) fn render_agent_panel_header(
     buffer: &mut Buffer,
     area: Rect,
     agent_view_label: Option<&str>,
+    session_count: usize,
     config: &ClientShellConfig,
     hits: &mut ShellHitMap,
 ) -> bool {
@@ -181,6 +183,27 @@ pub(super) fn render_agent_panel_header(
             })
             .add_modifier(Modifier::BOLD),
     );
+    hits.agent_session_count = Rect::default();
+    let gap_start = area.x.saturating_add(8);
+    let gap_width = sort_rect.x.saturating_sub(gap_start).saturating_sub(1);
+    let count = session_count.to_string();
+    let width = count.len() as u16;
+    if gap_width >= width {
+        let rect = Rect::new(gap_start + (gap_width - width) / 2, area.y + 1, width, 1);
+        put_text(
+            buffer,
+            rect.x,
+            rect.y,
+            rect.width,
+            &count,
+            Style::default()
+                .fg(config.palette.text)
+                .add_modifier(Modifier::BOLD),
+        );
+        if config.mouse_capture {
+            hits.agent_session_count = rect;
+        }
+    }
     true
 }
 

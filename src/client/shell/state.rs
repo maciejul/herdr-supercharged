@@ -106,6 +106,7 @@ pub(super) struct ShellHitMap {
     pub(super) agent_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) agent_max_scroll: usize,
     pub(super) agent_sort_toggle: Rect,
+    pub(super) agent_session_count: Rect,
     pub(super) sidebar_divider: Rect,
     pub(super) sidebar_section_divider: Rect,
     pub(super) sidebar_toggle: Rect,
@@ -667,6 +668,7 @@ pub(super) enum PendingEndpointKind {
     ReloadConfig,
     BackgroundTracking,
     UnreadSuspendDelay,
+    ResourceUsage,
     IntegrationList,
     IntegrationInstall,
     PrepareWorktreeCreate {
@@ -898,6 +900,7 @@ pub(super) struct ClientCopyModeState {
 }
 
 pub(crate) struct ClientShellState {
+    pub(super) resource_usage: super::resource_usage::ResourcePopup,
     pub(super) machine_diagnostics: super::machine_diagnostics::MachineDiagnostics,
     pub(super) config: ClientShellConfig,
     pub(super) snapshot: Option<Box<ClientShellSnapshot>>,
@@ -1077,6 +1080,7 @@ impl ClientShellState {
         }
         Self {
             machine_diagnostics: Default::default(),
+            resource_usage: Default::default(),
             config,
             snapshot: None,
             active_snapshot_generation: None,

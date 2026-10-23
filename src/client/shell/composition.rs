@@ -718,6 +718,19 @@ impl ClientShellState {
             };
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
+        if self.hits.agent_session_count.is_empty() {
+            self.resource_usage.dismiss();
+        }
+        if self.resource_usage.visible()
+            && self.overlay.is_none()
+            && self.hits.popup.is_none()
+            && !self.hits.agent_session_count.is_empty()
+        {
+            let mut composed = frame.to_ratatui_buffer()?;
+            let area = self.render_resource_usage(&mut composed);
+            occlusion.cover(area);
+            frame.replace_from_ratatui_buffer_preserving_effects(&composed, None);
+        }
         if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
             help.scroll = help.scroll.min(self.hits.help_max_scroll);
         }

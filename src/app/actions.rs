@@ -236,7 +236,14 @@ impl AppState {
             pane_id,
         };
         if previous.as_ref() == Some(&target) {
-            return false;
+            let mut changed = false;
+            for pane in self.workspaces[ws_idx].tabs[tab_idx].panes.values_mut() {
+                if pane.suspended && !pane.suspended_resume_requested {
+                    pane.suspended_resume_requested = true;
+                    changed = true;
+                }
+            }
+            return changed;
         }
 
         self.switch_workspace_tab(ws_idx, tab_idx);
@@ -466,7 +473,9 @@ impl AppState {
         for pane in tab.panes.values_mut() {
             if !pane.seen {
                 pane.seen = true;
+                pane.suspended_resume_requested = pane.suspended;
                 pane.unread_since = None;
+                pane.suspension_reset_at = Some(std::time::Instant::now());
                 changed = true;
             }
         }
@@ -1865,6 +1874,7 @@ impl AppState {
         }
         if pane.seen {
             pane.unread_since = None;
+            pane.suspension_reset_at = Some(std::time::Instant::now());
         } else {
             pane.unread_since.get_or_insert_with(Instant::now);
         }

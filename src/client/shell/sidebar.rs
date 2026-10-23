@@ -844,7 +844,7 @@ pub(in crate::client::shell) fn customized_workspace_rows(
     }) else {
         return rows;
     };
-    if customization.selected_tab_name_as_workspace {
+    if customization.selected_tab_name_as_workspace && !workspace.custom_label {
         for row in &mut rows {
             for token in row {
                 if let crate::ui::ResolvedTokenKind::Workspace(label) = &mut token.kind {

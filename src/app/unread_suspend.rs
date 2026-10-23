@@ -110,7 +110,7 @@ impl App {
             if let Some(pane) = ws.pane_state_mut(pane_id) {
                 if pane.suspended {
                     // Retry on the next explicit selection, not every event-loop tick.
-                    pane.seen = false;
+                    pane.suspended_resume_requested = false;
                 }
                 return pane.suspended;
             }
@@ -118,7 +118,11 @@ impl App {
         false
     }
 
-    pub(crate) fn suspend_unread_agents(&mut self, now: Instant) -> bool {
+    pub(crate) fn suspend_read_agents(
+        &mut self,
+        now: Instant,
+        protected: &std::collections::HashSet<crate::layout::PaneId>,
+    ) -> bool {
         if self.unread_suspend_check_at.is_some_and(|next| now < next) {
             return false;
         }
@@ -131,27 +135,24 @@ impl App {
         self.unread_suspend_check_at = Some(now + interval);
         // Bounded maintenance cadence, independent of render/client frequency.
         let mut candidates = Vec::new();
-        for ws in &self.state.workspaces {
-            for tab in &ws.tabs {
-                let expired = tab.panes.values().any(|pane| {
+        let previous = std::mem::take(&mut self.read_idle_since);
+        for (ws_index, ws) in self.state.workspaces.iter().enumerate() {
+            for (tab_index, tab) in ws.tabs.iter().enumerate() {
+                let viewed = (self.state.active == Some(ws_index) && ws.active_tab == tab_index)
+                    || tab.panes.keys().any(|id| protected.contains(id));
+                let unsafe_tab = tab.panes.values().any(|pane| {
                     !pane.seen
-                        && !pane.suspended
-                        && pane
-                            .unread_since
-                            .is_some_and(|since| now.saturating_duration_since(since) >= timeout)
-                });
-                if !expired
-                    || tab.panes.values().any(|pane| {
-                        self.state
+                        || self
+                            .state
                             .terminals
                             .get(&pane.attached_terminal_id)
-                            .is_some_and(|terminal| {
+                            .is_none_or(|terminal| {
                                 (terminal.effective_agent_label().is_some()
                                     && terminal.state != AgentState::Idle)
                                     || has_background_work(terminal)
                             })
-                    })
-                {
+                });
+                if viewed || unsafe_tab {
                     continue;
                 }
                 // A split tab is suspended only if every running agent can be resumed.
@@ -180,8 +181,20 @@ impl App {
                     };
                     plans.push((pane_id, pane.attached_terminal_id.clone(), plan));
                 }
-                if safe {
-                    candidates.extend(plans);
+                if safe && !plans.is_empty() {
+                    let mut since = previous.get(&tab.root_pane).copied().unwrap_or(now);
+                    if let Some(reset) = tab
+                        .panes
+                        .values()
+                        .filter_map(|pane| pane.suspension_reset_at)
+                        .max()
+                    {
+                        since = since.max(reset);
+                    }
+                    self.read_idle_since.insert(tab.root_pane, since);
+                    if now.saturating_duration_since(since) >= timeout {
+                        candidates.extend(plans);
+                    }
                 }
             }
         }
@@ -193,7 +206,8 @@ impl App {
             for ws in &mut self.state.workspaces {
                 if let Some(pane) = ws.pane_state_mut(pane_id) {
                     pane.suspended = true;
-                    pane.seen = false;
+                    pane.seen = true;
+                    pane.suspended_resume_requested = false;
                     pane.suspension_exit_pending = true;
                     break;
                 }
@@ -239,6 +253,12 @@ mod tests {
     use crate::layout::PaneId;
     use crate::terminal::{TerminalId, TerminalRuntime};
 
+    impl App {
+        fn suspend_unread_agents(&mut self, now: Instant) -> bool {
+            self.suspend_read_agents(now, &Default::default())
+        }
+    }
+
     fn setup(now: Instant, agent: Agent) -> (App, PaneId, TerminalId) {
         let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = App::new(
@@ -252,8 +272,9 @@ mod tests {
         let ws = &mut app.state.workspaces[0];
         let pane_id = ws.tabs[0].root_pane;
         let pane = ws.tabs[0].panes.get_mut(&pane_id).unwrap();
-        pane.seen = false;
-        pane.unread_since = Some(now);
+        pane.seen = true;
+        pane.unread_since = None;
+        pane.suspension_reset_at = None;
         let terminal_id = pane.attached_terminal_id.clone();
         let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
         terminal.set_detected_state_with_screen_signals_at(
@@ -275,7 +296,106 @@ mod tests {
             terminal_id.clone(),
             TerminalRuntime::test_with_screen_bytes(80, 24, b"done"),
         );
+        app.state.workspaces[0].active_tab = 1;
+        app.read_idle_since
+            .insert(app.state.workspaces[0].tabs[0].root_pane, now);
         (app, pane_id, terminal_id)
+    }
+
+    #[tokio::test]
+    async fn read_idle_suspension_immediate_preserves_unread_completion() {
+        for seen in [true, false] {
+            let now = Instant::now();
+            let (mut app, pane_id, terminal_id) = setup(now, Agent::Claude);
+            app.unread_suspend_delay_seconds = 0;
+            app.state.workspaces[0].active_tab = 1;
+            app.state.workspaces[0]
+                .pane_state_mut(pane_id)
+                .unwrap()
+                .seen = seen;
+            assert_eq!(app.suspend_unread_agents(now), seen, "read={seen}");
+            assert_eq!(app.terminal_runtimes.get(&terminal_id).is_none(), seen);
+        }
+    }
+
+    #[tokio::test]
+    async fn suspension_preserves_custom_names_through_restore_and_resume() {
+        let now = Instant::now();
+        let (mut app, pane_id, terminal_id) = setup(now, Agent::Claude);
+        app.state.workspaces[0].set_custom_name("My custom workspace".into());
+        app.state.workspaces[0].tabs[0].set_custom_name("My custom tab".into());
+        app.unread_suspend_delay_seconds = 0;
+        assert!(app.suspend_unread_agents(now));
+        assert_eq!(
+            app.state.workspaces[0].custom_name.as_deref(),
+            Some("My custom workspace")
+        );
+        assert_eq!(
+            app.state.workspaces[0].tabs[0].custom_name.as_deref(),
+            Some("My custom tab")
+        );
+        assert_eq!(
+            app.state.workspaces[0].tab_display_name(0).as_deref(),
+            Some("My custom tab (Suspended)")
+        );
+        let saved = crate::persist::capture(
+            &app.state.workspaces,
+            &app.state.terminals,
+            &app.terminal_runtimes,
+            app.state.active,
+            app.state.selected,
+        );
+        let saved: crate::persist::SessionSnapshot =
+            serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
+        let (tx, _) = tokio::sync::mpsc::channel(32);
+        let (workspaces, _, runtimes) = crate::persist::restore(
+            &saved,
+            None,
+            24,
+            80,
+            0,
+            &app.state.default_shell,
+            app.state.shell_mode,
+            true,
+            tx,
+            std::sync::Arc::new(tokio::sync::Notify::new()),
+            std::sync::Arc::new(crate::render_signal::RenderSignal::new()),
+        );
+        assert_eq!(
+            workspaces[0].custom_name.as_deref(),
+            Some("My custom workspace")
+        );
+        assert_eq!(
+            workspaces[0].tabs[0].custom_name.as_deref(),
+            Some("My custom tab")
+        );
+        assert_eq!(
+            workspaces[0].tab_display_name(0).as_deref(),
+            Some("My custom tab (Suspended)")
+        );
+        drop(runtimes);
+        app.handle_internal_event(AppEvent::PaneDied {
+            pane_id,
+            exit_reason: crate::platform::ChildExitReason::Exited,
+        });
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .pending_agent_resume_plan
+            .as_mut()
+            .unwrap()
+            .argv = vec!["echo".into(), "resumed".into()];
+        app.state.workspaces[0].switch_tab(0);
+        assert!(app.start_pending_agent_resume_for_terminal(&terminal_id, 24, 80, true));
+        assert_eq!(
+            app.state.workspaces[0].custom_name.as_deref(),
+            Some("My custom workspace")
+        );
+        assert_eq!(
+            app.state.workspaces[0].tab_display_name(0).as_deref(),
+            Some("My custom tab")
+        );
     }
 
     #[tokio::test]
@@ -301,6 +421,66 @@ mod tests {
             );
             assert!(app.terminal_runtimes.get(&terminal_id).is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn read_idle_suspension_resets_delay_and_protects_other_clients() {
+        let now = Instant::now();
+        let (mut app, pane_id, _) = setup(now, Agent::Claude);
+        app.unread_suspend_delay_seconds = 3600;
+        let protected = std::collections::HashSet::from([pane_id]);
+        assert!(!app.suspend_read_agents(now + Duration::from_secs(3600), &protected));
+        assert!(app.read_idle_since.is_empty());
+        assert!(!app.suspend_read_agents(now + Duration::from_secs(3660), &Default::default()));
+        assert!(!app.suspend_read_agents(now + Duration::from_secs(7200), &Default::default()));
+        assert!(app.suspend_read_agents(now + Duration::from_secs(7260), &Default::default()));
+    }
+
+    #[tokio::test]
+    async fn read_idle_suspension_never_suspends_a_split_with_unread_completion() {
+        let now = Instant::now();
+        let (mut app, pane_id, terminal_id) = setup(now, Agent::Claude);
+        app.unread_suspend_delay_seconds = 0;
+        let other_id = crate::layout::PaneId::alloc();
+        let mut other = crate::pane::PaneState::new(terminal_id.clone());
+        other.seen = false;
+        app.state.workspaces[0].tabs[0]
+            .panes
+            .insert(other_id, other);
+        assert!(!app.suspend_read_agents(now, &Default::default()));
+        assert!(
+            !app.state.workspaces[0]
+                .pane_state(pane_id)
+                .unwrap()
+                .suspended
+        );
+    }
+
+    #[tokio::test]
+    async fn read_idle_suspension_background_burst_resets_timer_between_sweeps() {
+        let now = Instant::now();
+        let (mut app, pane_id, _) = setup(now - Duration::from_secs(3600), Agent::Claude);
+        app.unread_suspend_delay_seconds = 3600;
+        let public_id = app.public_pane_id(0, pane_id).unwrap();
+        for items in [serde_json::json!([{"id":"task"}]), serde_json::json!([])] {
+            let request = serde_json::from_value(serde_json::json!({
+                "id": "background-reset", "method": "pane.report_metadata", "params": {
+                    "pane_id": public_id, "source": "test-background", "tokens": {
+                        "herdr_background_activity": serde_json::json!({"items":items}).to_string()
+                    }
+                }
+            }))
+            .unwrap();
+            let response = app.handle_api_request(request);
+            assert!(!response.contains("error"), "{response}");
+        }
+        let reset = app.state.workspaces[0]
+            .pane_state(pane_id)
+            .unwrap()
+            .suspension_reset_at
+            .unwrap();
+        assert!(!app.suspend_read_agents(reset, &Default::default()));
+        assert!(app.suspend_read_agents(reset + Duration::from_secs(3600), &Default::default()));
     }
 
     #[tokio::test]
@@ -374,7 +554,7 @@ mod tests {
             assert!(workspaces[0].tabs[0]
                 .panes
                 .values()
-                .any(|pane| pane.suspended && !pane.seen));
+                .any(|pane| pane.suspended && pane.seen && !pane.suspended_resume_requested));
             assert!(terminals
                 .values()
                 .any(|terminal| terminal.pending_agent_resume_plan.is_some()));
@@ -390,18 +570,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unread_suspend_skips_read_working_and_unresumable_sessions() {
-        for scenario in ["read", "working", "missing-session", "background"] {
+    async fn read_idle_suspension_skips_unread_working_and_unresumable_sessions() {
+        for scenario in [
+            "unread",
+            "working",
+            "blocked",
+            "focused",
+            "missing-session",
+            "background",
+        ] {
             let now = Instant::now();
             let (mut app, pane_id, terminal_id) = setup(now, Agent::Claude);
             let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
             match scenario {
-                "read" => {
+                "unread" => {
                     app.state.workspaces[0]
                         .pane_state_mut(pane_id)
                         .unwrap()
-                        .seen = true
+                        .seen = false
                 }
+                "focused" => app.state.workspaces[0].active_tab = 0,
+                "blocked" => terminal.state = AgentState::Blocked,
                 "working" => terminal.state = AgentState::Working,
                 "missing-session" => terminal.persisted_agent_session = None,
                 "background" => {
@@ -476,7 +665,14 @@ mod tests {
             .pending_agent_resume_plan
             .is_some());
         let pane = app.state.workspaces[0].pane_state(pane_id).unwrap();
-        assert!(pane.suspended && !pane.seen);
+        assert!(pane.suspended && pane.seen && !pane.suspended_resume_requested);
         assert!(!app.start_pending_agent_resume_for_terminal(&terminal_id, 24, 80, true));
+        assert!(app.state.focus_pane_in_workspace(0, pane_id));
+        assert!(
+            app.state.workspaces[0]
+                .pane_state(pane_id)
+                .unwrap()
+                .suspended_resume_requested
+        );
     }
 }

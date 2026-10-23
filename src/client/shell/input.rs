@@ -234,6 +234,9 @@ impl ClientShellState {
                 },
                 other => other,
             };
+            if self.handle_resource_usage_event(&event, &mut outcome) {
+                continue;
+            }
             if self.handle_machine_badge_event(&event, &mut outcome) {
                 continue;
             }

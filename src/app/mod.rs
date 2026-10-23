@@ -160,6 +160,7 @@ pub struct App {
     pub(crate) persist_pane_history: bool,
     /// Last render-loop attempt, including a throttled hidden-only PTY skip.
     pub(crate) last_render_at: Option<Instant>,
+    pub(crate) read_idle_since: std::collections::HashMap<crate::layout::PaneId, Instant>,
     pub(crate) unread_suspend_check_at: Option<Instant>,
     pub(crate) unread_suspend_delay_seconds: u64,
     /// Last attempt that could update a connected presentation surface.
@@ -680,6 +681,7 @@ impl App {
             window_title_template: None,
             persist_pane_history: config.experimental.pane_history,
             last_render_at: None,
+            read_idle_since: Default::default(),
             unread_suspend_check_at: None,
             unread_suspend_delay_seconds: if policy.persist_session {
                 unread_suspend::load_delay_seconds()

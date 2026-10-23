@@ -35,6 +35,20 @@ impl HeadlessServer {
             self.send_to_client(client_id, message);
             return false;
         }
+        // A resource observation must not acquire foreground ownership or block input commands.
+        if matches!(request.method, api::schema::Method::ServerResourceUsage(_)) {
+            self.send_to_client(
+                client_id,
+                crate::server::client_commands::success_message_with_result(
+                    boot_id,
+                    request_id,
+                    api::schema::ResponseResult::ResourceUsage {
+                        sample: crate::platform::resource_usage::cached(),
+                    },
+                ),
+            );
+            return false;
+        }
         let surface_active = client.shell_surface_active;
         if let api::schema::Method::ClientShellSurfaceSet(params) = &request.method {
             let Some((changed, projection_revision)) =

@@ -111,7 +111,9 @@ impl App {
                     let Some(pane) = tab.panes.get(&info.id) else {
                         continue;
                     };
-                    if pane.suspension_exit_pending || (pane.suspended && !pane.seen) {
+                    if pane.suspension_exit_pending
+                        || (pane.suspended && !pane.suspended_resume_requested)
+                    {
                         continue;
                     }
                     if self
@@ -193,7 +195,9 @@ impl App {
             ws.tabs.iter().find_map(|tab| {
                 tab.layout.pane_ids().into_iter().find_map(|pane_id| {
                     let pane = tab.panes.get(&pane_id)?;
-                    if pane.suspension_exit_pending || (pane.suspended && !pane.seen) {
+                    if pane.suspension_exit_pending
+                        || (pane.suspended && !pane.suspended_resume_requested)
+                    {
                         return None;
                     }
                     if &pane.attached_terminal_id != terminal_id {
@@ -326,7 +330,9 @@ impl App {
         for ws in &mut self.state.workspaces {
             if let Some(pane) = ws.pane_state_mut(pane_id) {
                 pane.suspended = false;
+                pane.suspended_resume_requested = false;
                 pane.unread_since = None;
+                pane.suspension_reset_at = Some(std::time::Instant::now());
                 break;
             }
         }
