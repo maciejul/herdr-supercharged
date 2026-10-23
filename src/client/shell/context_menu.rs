@@ -86,7 +86,7 @@ impl ClientContextMenuOverlay {
             }
         };
         if groups_enabled && matches!(self.target, ClientContextMenuTarget::Workspace { .. }) {
-            items.push(item("Move to group...", Action::MoveToSpaceGroup));
+            items.push(item("Move to group", Action::MoveToSpaceGroup));
         }
         items
     }
