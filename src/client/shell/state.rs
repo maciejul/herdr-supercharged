@@ -1260,6 +1260,10 @@ impl ClientShellState {
                 entries,
                 &self.active_endpoint_id,
                 &self.config.preferences.space_groups,
+                self.config
+                    .preferences
+                    .customization
+                    .keep_unread_spaces_visible,
             )
             .into_iter()
             .filter_map(|row| match row {

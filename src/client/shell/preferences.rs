@@ -14,6 +14,7 @@ pub(super) struct CustomizationPreferences {
     pub(super) automatic_tab_names: bool,
     pub(super) automatic_workspace_names: bool,
     pub(super) space_groups_enabled: bool,
+    pub(super) keep_unread_spaces_visible: bool,
     pub(super) show_selected_tab_name: bool,
     pub(super) show_workspace_tabs: bool,
     pub(super) selected_tab_name_as_workspace: bool,
@@ -33,6 +34,7 @@ impl Default for CustomizationPreferences {
             automatic_tab_names: true,
             automatic_workspace_names: true,
             space_groups_enabled: true,
+            keep_unread_spaces_visible: true,
             show_selected_tab_name: false,
             show_workspace_tabs: false,
             selected_tab_name_as_workspace: false,
@@ -223,6 +225,7 @@ mod tests {
     fn old_preferences_and_partial_customization_get_expected_defaults() {
         let old: ClientChromePreferences = serde_json::from_str("{}").expect("old preferences");
         assert!(old.customization.space_groups_enabled);
+        assert!(old.customization.keep_unread_spaces_visible);
         assert!(old.customization.automatic_tab_names);
         assert!(old.customization.automatic_workspace_names);
         let disabled: ClientChromePreferences = serde_json::from_str(

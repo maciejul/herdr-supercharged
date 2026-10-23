@@ -308,6 +308,7 @@ pub(super) fn render_expanded(
                     } else {
                         &[]
                     },
+                    config.preferences.customization.keep_unread_spaces_visible,
                 )
                 .into_iter()
                 .map(|row| match row {

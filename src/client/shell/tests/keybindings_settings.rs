@@ -986,12 +986,13 @@ fn customization_settings_persist_without_deleting_groups() {
     state.open_settings_overlay();
     let mut outcome = ClientShellInput::default();
     state.select_settings_section(ClientSettingsSection::Customization, &mut outcome);
-    for selected in (0..7).chain(9..19).chain(std::iter::once(20)) {
+    for selected in (0..7).chain(9..19).chain(20..22) {
         state.select_settings_choice(selected);
         state.apply_settings_choice(&mut outcome);
     }
     let saved = super::super::preferences::load(&path).expect("saved preferences");
     assert!(!saved.customization.space_groups_enabled);
+    assert!(!saved.customization.keep_unread_spaces_visible);
     assert!(!saved.customization.automatic_tab_names);
     assert!(!saved.customization.automatic_workspace_names);
     assert!(saved.customization.show_selected_tab_name);
@@ -1078,13 +1079,13 @@ fn customization_more_below_blinks_only_while_choices_are_hidden() {
             .collect();
         assert!(text.contains("↓ more below"));
 
-        state.select_settings_choice(20);
+        state.select_settings_choice(21);
         let frame = state.compose(width, height).expect("last choice visible");
         assert!(state
             .hits
             .settings_choices
             .iter()
-            .any(|(_, index)| *index == 20));
+            .any(|(_, index)| *index == 21));
         assert!(frame.cells.iter().all(|cell| cell.modifier & blink == 0));
         let text: String = frame
             .cells

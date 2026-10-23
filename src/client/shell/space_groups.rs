@@ -19,6 +19,7 @@ pub(super) fn grouped_rows(
     entries: Vec<WorkspaceEntry>,
     endpoint: &ClientEndpointId,
     groups: &[preferences::NamedSpaceGroup],
+    keep_unread_visible: bool,
 ) -> Vec<GroupedSpaceRow> {
     let key = endpoint_key(endpoint);
     let applicable = groups
@@ -41,7 +42,11 @@ pub(super) fn grouped_rows(
             if group.workspace_ids.contains(&workspace.workspace_id) && emitted.insert(entry.index)
             {
                 // Keep the active Space reachable even inside a collapsed group.
-                if !group.collapsed || workspace.focused {
+                if !group.collapsed
+                    || workspace.focused
+                    || (keep_unread_visible
+                        && workspace.agent_status == crate::api::schema::AgentStatus::Done)
+                {
                     rows.push(GroupedSpaceRow::Workspace(*entry));
                 }
             }
@@ -1135,6 +1140,83 @@ mod tests {
             outcome.actions.is_empty(),
             "organization must never close server workspaces"
         );
+    }
+
+    #[test]
+    fn collapsed_space_groups_keep_only_unread_and_active_spaces_visible() {
+        use crate::api::schema::AgentStatus;
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        let mut snapshot = super::super::tests::snapshot();
+        for (index, status) in [
+            AgentStatus::Done,
+            AgentStatus::Idle,
+            AgentStatus::Working,
+            AgentStatus::Blocked,
+            AgentStatus::Unknown,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut workspace = snapshot.workspaces[0].clone();
+            workspace.workspace_id = format!("status_{index}");
+            workspace.focused = false;
+            workspace.agent_status = status;
+            snapshot.workspaces.push(workspace);
+        }
+        let mut outcome = ClientShellInput::default();
+        for workspace in &snapshot.workspaces {
+            state.save_space_group(
+                Some(workspace.workspace_id.clone()),
+                None,
+                "Work",
+                &mut outcome,
+            );
+        }
+        state.set_snapshot(Box::new(snapshot.clone()));
+        state.set_pane_surface(super::super::tests::surface());
+        state.compose(100, 40).expect("expanded frame");
+        assert_eq!(state.hits.workspaces.len(), 6);
+        let group = state.hits.space_groups[0].0;
+        state.handle_space_group_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: group.x,
+                row: group.y,
+                modifiers: KeyModifiers::empty(),
+            },
+            &mut outcome,
+        );
+        state.compose(100, 40).expect("collapsed unread frame");
+        assert_eq!(
+            state
+                .hits
+                .workspaces
+                .iter()
+                .map(|hit| hit.workspace_id.as_str())
+                .collect::<Vec<_>>(),
+            ["ws_1", "status_0"]
+        );
+
+        state.open_settings_overlay();
+        state.select_settings_section(ClientSettingsSection::Customization, &mut outcome);
+        state.select_settings_choice(21);
+        state.apply_settings_choice(&mut outcome);
+        state.cancel_settings_overlay();
+        state.compose(100, 40).expect("option disabled frame");
+        assert_eq!(state.hits.workspaces.len(), 1);
+        assert_eq!(state.hits.workspaces[0].workspace_id, "ws_1");
+
+        state.open_settings_overlay();
+        state.select_settings_section(ClientSettingsSection::Customization, &mut outcome);
+        state.select_settings_choice(21);
+        state.apply_settings_choice(&mut outcome);
+        state.cancel_settings_overlay();
+        state.compose(100, 40).expect("option reenabled frame");
+        assert_eq!(state.hits.workspaces.len(), 2);
+        snapshot.workspaces[1].agent_status = AgentStatus::Idle;
+        state.set_snapshot(Box::new(snapshot));
+        state.compose(100, 40).expect("completion read frame");
+        assert_eq!(state.hits.workspaces.len(), 1);
     }
 
     #[test]

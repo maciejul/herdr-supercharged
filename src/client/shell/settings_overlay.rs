@@ -314,6 +314,10 @@ pub(super) fn render_settings_overlay(
                     "All tabs below open Space: {}",
                     on_off(customization.show_workspace_tabs)
                 ),
+                format!(
+                    "Keep unread Spaces in collapsed groups: {}",
+                    on_off(customization.keep_unread_spaces_visible)
+                ),
             ];
             let visible = usize::from(content.height.saturating_sub(3));
             let scroll = settings.selected.saturating_sub(visible.saturating_sub(1));
