@@ -458,7 +458,23 @@ remains available when groups are disabled or absent.
 Unnamed tabs follow the title reported by their Claude or Codex agent. In a split
 tab, the focused named agent takes precedence. A Space containing one agent also
 uses that agent's conversation title. Manually assigned Space/tab names are kept.
-If an agent provides no usable title or name, Herdr keeps its existing label.
+If an agent provides no usable title or name, Herdr keeps its last meaningful
+label. Status-only terminal titles such as `Working` and `Ready`, and temporary
+thread IDs, do not replace conversation names. Explicit agent metadata and manual
+Space/tab names remain authoritative.
+
+For Codex, configure its native terminal title to expose the conversation title
+instead of its run state. In `~/.codex/config.toml`:
+
+```toml
+[tui]
+terminal_title = ["thread-title"]
+```
+
+Restart the Codex CLI to load this setting. Its generated thread title arrives
+after the first prompt; Herdr keeps the existing label until then. Avoid combining
+`run-state` with the title if you want stable task names. This setting was verified
+with Codex CLI 0.164.0.
 
 ### Sidebar row layouts
 
