@@ -282,6 +282,9 @@ pub(crate) fn render_sidebar(
                     )
                     .len()
                     .max(1)
+                    .saturating_add(super::super::workspace_tabs::line_count(
+                        snapshot, workspace, config,
+                    ))
                     .saturating_add(workspace_activity_lines(
                         &activities[entry.index],
                         state.expanded_background_activity.contains(&(
@@ -344,7 +347,13 @@ pub(crate) fn render_sidebar(
         };
         let status = displayed_workspace_status(snapshot, workspace, state.collapsed_groups);
         let rows = customized_workspace_rows(snapshot, workspace, status, entry.indented, config);
-        let row_height = row_heights[entry_position].min(body.height);
+        let available_height =
+            if super::super::workspace_tabs::line_count(snapshot, workspace, config) > 0 {
+                body.bottom().saturating_sub(y)
+            } else {
+                body.height
+            };
+        let row_height = row_heights[entry_position].min(available_height);
         let parent_height = (rows.len().max(1) as u16).min(row_height);
         if y.saturating_add(row_height) > body.bottom() {
             break;
@@ -375,13 +384,28 @@ pub(crate) fn render_sidebar(
             state.selected_workspace_id.is_some(),
             dragged,
         );
-        render_workspace_activity(
+        let tab_height = super::super::workspace_tabs::render(
             buffer,
             Rect::new(
                 rect.x,
                 rect.y + parent_height,
                 rect.width,
                 rect.height.saturating_sub(parent_height),
+            ),
+            snapshot,
+            workspace,
+            state.active_endpoint_id,
+            config,
+            state.workspace_tab_offsets,
+            hits,
+        );
+        render_workspace_activity(
+            buffer,
+            Rect::new(
+                rect.x,
+                rect.y + parent_height + tab_height,
+                rect.width,
+                rect.height.saturating_sub(parent_height + tab_height),
             ),
             &activities[entry.index],
             &workspace.workspace_id,
@@ -829,7 +853,9 @@ pub(in crate::client::shell) fn customized_workspace_rows(
             }
         }
     }
-    if customization.show_selected_tab_name {
+    if customization.show_selected_tab_name
+        && !(customization.show_workspace_tabs && workspace.focused)
+    {
         rows.push(vec![crate::ui::ResolvedToken {
             kind: crate::ui::ResolvedTokenKind::Tab(tab.label.clone()),
             style: Default::default(),

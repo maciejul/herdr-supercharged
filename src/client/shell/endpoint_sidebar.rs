@@ -380,6 +380,9 @@ pub(super) fn render_expanded(
                             )
                             .len()
                             .max(1)
+                            .saturating_add(super::workspace_tabs::line_count(
+                                snapshot, workspace, config,
+                            ))
                             .saturating_add(super::sidebar::workspace_activity_lines(
                                 &activities[index],
                                 state.expanded_background_activity.contains(&(
@@ -583,7 +586,13 @@ pub(super) fn render_expanded(
                     entry.indented,
                     config,
                 );
-                let height = row_heights[row_index].min(body.height);
+                let available_height =
+                    if super::workspace_tabs::line_count(snapshot, workspace, config) > 0 {
+                        body.bottom().saturating_sub(y)
+                    } else {
+                        body.height
+                    };
+                let height = row_heights[row_index].min(available_height);
                 let parent_height = (tokens.len().max(1) as u16).min(height);
                 if y.saturating_add(height) > body.bottom() {
                     break;
@@ -612,13 +621,28 @@ pub(super) fn render_expanded(
                     state.selected_workspace_id.is_some(),
                     false,
                 );
-                super::sidebar::render_workspace_activity(
+                let tab_height = super::workspace_tabs::render(
                     buffer,
                     Rect::new(
                         nested.x,
                         rect.y + parent_height,
                         nested.width,
                         rect.height.saturating_sub(parent_height),
+                    ),
+                    snapshot,
+                    workspace,
+                    &endpoint.endpoint_id,
+                    config,
+                    state.workspace_tab_offsets,
+                    hits,
+                );
+                super::sidebar::render_workspace_activity(
+                    buffer,
+                    Rect::new(
+                        nested.x,
+                        rect.y + parent_height + tab_height,
+                        nested.width,
+                        rect.height.saturating_sub(parent_height + tab_height),
                     ),
                     &activities[row_index],
                     &workspace.workspace_id,

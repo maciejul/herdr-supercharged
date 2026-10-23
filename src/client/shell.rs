@@ -39,6 +39,7 @@ mod state;
 mod surface_patch;
 mod text_editor;
 mod word_selection;
+mod workspace_tabs;
 mod worktrees;
 use text_editor::TextEditor;
 use word_selection::ClientWordSelection;

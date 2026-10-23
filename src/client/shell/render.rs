@@ -240,6 +240,7 @@ pub(super) struct ShellRenderState<'a> {
     pub(super) agent_scroll: &'a mut usize,
     pub(super) expanded_background_activity: &'a HashSet<(ClientEndpointId, String)>,
     pub(super) background_activity_offsets: &'a HashMap<(ClientEndpointId, String), usize>,
+    pub(super) workspace_tab_offsets: &'a HashMap<(ClientEndpointId, String), usize>,
     pub(super) tab_scroll: &'a mut usize,
     pub(super) reveal_focused_workspace: &'a mut bool,
     pub(super) reveal_focused_tab: &'a mut bool,
@@ -340,6 +341,8 @@ pub(super) fn render_shell(
         hits.endpoint_agents.clear();
         hits.background_activity.clear();
         hits.background_activity_scroll.clear();
+        hits.workspace_tabs.clear();
+        hits.workspace_tabs_scroll.clear();
         hits.tab_scroll_left = Rect::default();
         hits.tab_scroll_right = Rect::default();
         hits.new_tab = Rect::default();

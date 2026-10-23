@@ -1824,6 +1824,10 @@ impl ClientShellState {
             return;
         }
 
+        if self.handle_workspace_tabs_mouse(mouse, outcome) {
+            return;
+        }
+
         if self.handle_background_activity_mouse(mouse, outcome) {
             return;
         }

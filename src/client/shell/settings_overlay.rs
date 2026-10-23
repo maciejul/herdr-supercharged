@@ -310,6 +310,10 @@ pub(super) fn render_settings_overlay(
                     "Suspend unread tabs after: {}",
                     unread_suspend_delay.unwrap_or("unavailable")
                 ),
+                format!(
+                    "All tabs below open Space: {}",
+                    on_off(customization.show_workspace_tabs)
+                ),
             ];
             let visible = usize::from(content.height.saturating_sub(3));
             let scroll = settings.selected.saturating_sub(visible.saturating_sub(1));

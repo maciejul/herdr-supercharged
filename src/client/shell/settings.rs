@@ -190,7 +190,7 @@ impl ClientShellState {
                 ClientSettingsSection::Theme => crate::config::THEME_NAMES.len(),
                 ClientSettingsSection::Indicators | ClientSettingsSection::Sound => 2,
                 ClientSettingsSection::Toast => 4,
-                ClientSettingsSection::Customization => 20,
+                ClientSettingsSection::Customization => 21,
                 ClientSettingsSection::Integrations => settings.integrations.len(),
             },
             _ => 0,
@@ -375,6 +375,7 @@ impl ClientShellState {
                 }
                 let customization = &mut self.config.preferences.customization;
                 match selected {
+                    20 => customization.show_workspace_tabs = !customization.show_workspace_tabs,
                     0 => customization.space_groups_enabled = !customization.space_groups_enabled,
                     1 => {
                         customization.show_selected_tab_name = !customization.show_selected_tab_name
