@@ -758,6 +758,10 @@ fn sigwinch_refreshes_host_palette_without_resizing() {
     writer.flush().unwrap();
     // Let startup settle and the resize watcher install its signal handler.
     thread::sleep(Duration::from_millis(250));
+    // WSL intentionally omits ANSI palette queries. A resize signal must repeat
+    // the same host-supported query set that was used during startup.
+    let ansi_query = "\x1b]4;15;?\x1b\\";
+    let queries_ansi_palette = read_output(&output).contains(ansi_query);
 
     for _ in 0..2 {
         let watermark = output_len(&output);
@@ -769,9 +773,10 @@ fn sigwinch_refreshes_host_palette_without_resizing() {
             wait_until(Duration::from_secs(5), Duration::from_millis(25), || {
                 let captured = read_output(&output);
                 let refreshed = &captured[watermark..];
-                refreshed.contains(queries) && refreshed.contains("\x1b]4;15;?\x1b\\")
+                refreshed.contains(queries)
+                    && refreshed.contains(ansi_query) == queries_ansi_palette
             }),
-            "SIGWINCH should query default colors and the ANSI palette without changing PTY size"
+            "SIGWINCH should repeat the supported host color queries without changing PTY size"
         );
         writer
             .write_all(b"\x1b]10;rgb:eeee/eeee/eeee\x1b\\\x1b]11;rgb:1111/2222/3333\x1b\\")
