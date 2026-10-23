@@ -307,7 +307,7 @@ pub(super) fn render_settings_overlay(
                     on_off(customization.automatic_workspace_names)
                 ),
                 format!(
-                    "Suspend unread tabs after: {}",
+                    "Suspend read / idle tabs after: {}",
                     unread_suspend_delay.unwrap_or("unavailable")
                 ),
                 format!(

@@ -6312,6 +6312,22 @@
             "params"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "server.resource_usage",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
         }
       ],
       "properties": {
@@ -9149,6 +9165,31 @@
             }
           ]
         },
+        "ProcessUsage": {
+          "properties": {
+            "measured": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "memory_bytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "processes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "processes",
+            "measured",
+            "memory_bytes"
+          ],
+          "type": "object"
+        },
         "ReadFormat": {
           "enum": [
             "text",
@@ -9164,6 +9205,37 @@
             "detection"
           ],
           "type": "string"
+        },
+        "ResourceUsage": {
+          "properties": {
+            "claude": {
+              "$ref": "#/schemas/success_response/$defs/ProcessUsage"
+            },
+            "codex": {
+              "$ref": "#/schemas/success_response/$defs/ProcessUsage"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "mcp": {
+              "$ref": "#/schemas/success_response/$defs/ProcessUsage"
+            },
+            "sampled_unix_seconds": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "claude",
+            "codex",
+            "mcp",
+            "sampled_unix_seconds"
+          ],
+          "type": "object"
         },
         "ResponseResult": {
           "oneOf": [
@@ -10401,6 +10473,28 @@
                 "type",
                 "active",
                 "projection_revision"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "sample": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/schemas/success_response/$defs/ResourceUsage"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": {
+                  "const": "resource_usage",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type"
               ],
               "type": "object"
             },

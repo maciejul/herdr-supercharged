@@ -8333,3 +8333,122 @@ fn no_handle_internal_event_bypass_in_module() {
         bypass_lines.join("\n  ")
     );
 }
+
+#[test]
+fn read_idle_suspension_protects_direct_terminal_viewers() {
+    for observe in [false, true] {
+        with_terminal_session_test_server(|server, terminal_id, target, _| {
+            let now = Instant::now();
+            server.app.state.active = Some(0);
+            let pane_id = server.app.state.workspaces[0].tabs[0].root_pane;
+            let other = server.app.state.workspaces[0].test_add_tab(None);
+            server.app.state.workspaces[0].switch_tab(other);
+            server.app.state.ensure_test_terminals();
+            let terminal = server.app.state.terminals.get_mut(&terminal_id).unwrap();
+            terminal.set_detected_state_with_screen_signals_at(
+                Some(crate::detect::Agent::Claude),
+                crate::detect::AgentState::Idle,
+                false,
+                false,
+                false,
+                false,
+                now,
+            );
+            terminal.set_persisted_agent_session(crate::agent_resume::PersistedAgentSession {
+                source: "herdr:claude".into(),
+                agent: "claude".into(),
+                session_ref: crate::agent_resume::AgentSessionRef::id("direct-viewer-test")
+                    .unwrap(),
+            });
+            server.app.unread_suspend_delay_seconds = 0;
+            let mut client = ClientConnection::new(
+                (80, 24),
+                crate::kitty_graphics::HostCellSize::default(),
+                1,
+                RenderEncoding::SemanticFrame,
+                None,
+            );
+            client.mode = if observe {
+                ClientConnectionMode::TerminalObserve {
+                    terminal_id: target,
+                }
+            } else {
+                ClientConnectionMode::TerminalAttach {
+                    terminal_id: target,
+                }
+            };
+            server.clients.insert(1, client);
+            server.handle_scheduled_tasks_headless(now, false);
+            assert!(
+                !server.app.state.workspaces[0]
+                    .pane_state(pane_id)
+                    .unwrap()
+                    .suspended
+            );
+            server.clients.remove(&1);
+            server.handle_scheduled_tasks_headless(now + Duration::from_secs(2), false);
+            assert!(
+                server.app.state.workspaces[0]
+                    .pane_state(pane_id)
+                    .unwrap()
+                    .suspended
+            );
+            assert!(
+                server.app.state.workspaces[0]
+                    .pane_state(pane_id)
+                    .unwrap()
+                    .seen
+            );
+        });
+    }
+}
+
+#[tokio::test]
+async fn resource_usage_poll_does_not_promote_client_or_occupy_command_lane() {
+    let mut server = test_headless_server();
+    let (writer, _control, _render) = test_client_writer();
+    let mut client = ClientConnection::new(
+        (80, 24),
+        crate::kitty_graphics::HostCellSize::default(),
+        1,
+        RenderEncoding::SemanticFrame,
+        Some(writer),
+    );
+    client.mode = ClientConnectionMode::ClientShell;
+    server.clients.insert(41, client);
+    let before = server.foreground_client_id;
+    assert!(!server.handle_client_shell_endpoint_request(
+        41,
+        server.client_shell_boot_id.clone(),
+        Box::new(api::schema::Request {
+            id: "resource-read".into(),
+            method: api::schema::Method::ServerResourceUsage(Default::default()),
+        })
+    ));
+    assert_eq!(server.foreground_client_id, before);
+    assert!(!server.clients[&41].shell_endpoint_command_in_flight);
+}
+
+#[test]
+fn read_idle_suspension_direct_attach_requests_resume() {
+    with_terminal_session_test_server(|server, terminal_id, target, _| {
+        let pane_id = server.app.state.workspaces[0].tabs[0].root_pane;
+        let pane = server.app.state.workspaces[0]
+            .pane_state_mut(pane_id)
+            .unwrap();
+        pane.suspended = true;
+        pane.seen = true;
+        pane.suspended_resume_requested = false;
+        // Keep exit pending: attaching must request resume without racing the old process exit.
+        pane.suspension_exit_pending = true;
+        connect_pending_terminal_client(server, 7);
+        assert!(server.attach_terminal_client(7, target, false));
+        assert!(
+            server.app.state.workspaces[0]
+                .pane_state(pane_id)
+                .unwrap()
+                .suspended_resume_requested
+        );
+        assert!(server.app.terminal_runtimes.get(&terminal_id).is_some());
+    });
+}

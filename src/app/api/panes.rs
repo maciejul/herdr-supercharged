@@ -1843,6 +1843,9 @@ impl App {
                 );
             }
         }
+        let background_report = tokens
+            .as_ref()
+            .is_some_and(|tokens| tokens.contains_key("herdr_background_activity"));
         let token_changed = tokens.is_some_and(|tokens| {
             let changed = terminal
                 .metadata_tokens
@@ -1870,6 +1873,11 @@ impl App {
             });
         }
         if token_changed {
+            if background_report {
+                if let Some(pane) = self.state.workspaces[ws_idx].pane_state_mut(pane_id) {
+                    pane.suspension_reset_at = Some(std::time::Instant::now());
+                }
+            }
             self.sync_agent_metadata_deadline();
             self.emit_pane_updated(ws_idx, pane_id);
         }

@@ -1831,6 +1831,18 @@ impl HeadlessServer {
             .state
             .direct_attach_resize_locks
             .insert(real_terminal_id.clone());
+        for pane in self
+            .app
+            .state
+            .workspaces
+            .iter_mut()
+            .flat_map(|ws| &mut ws.tabs)
+            .flat_map(|tab| tab.panes.values_mut())
+        {
+            if pane.attached_terminal_id == real_terminal_id && pane.suspended {
+                pane.suspended_resume_requested = true;
+            }
+        }
         self.app
             .start_pending_agent_resume_for_terminal(&real_terminal_id, rows, cols, true);
         if let Some(runtime) = self.app.terminal_runtimes.get(&real_terminal_id) {
@@ -3276,7 +3288,32 @@ impl HeadlessServer {
         if self.host_shutdown_requested() {
             return false;
         }
-        let mut changed = self.app.suspend_unread_agents(now);
+        let mut changed = if self
+            .app
+            .unread_suspend_check_at
+            .is_none_or(|next| now >= next)
+        {
+            let protected = self
+                .app
+                .state
+                .workspaces
+                .iter()
+                .flat_map(|ws| &ws.tabs)
+                .flat_map(|tab| &tab.panes)
+                .filter(|(id, pane)| {
+                    self.any_shell_surface_contains_pane(**id)
+                        || !terminal_stream_client_ids(
+                            &self.clients,
+                            pane.attached_terminal_id.as_str(),
+                        )
+                        .is_empty()
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            self.app.suspend_read_agents(now, &protected)
+        } else {
+            false
+        };
 
         // No resize polling needed — server has no terminal.
         // Client resize messages drive size changes instead.

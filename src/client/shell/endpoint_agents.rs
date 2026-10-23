@@ -59,16 +59,17 @@ pub(super) fn render_expanded(
     offsets: &HashMap<(ClientEndpointId, String), usize>,
     hits: &mut ShellHitMap,
 ) {
+    let rows = agent_rows(endpoints, active_endpoint_id, config);
     if !super::agent_sidebar::render_agent_panel_header(
         buffer,
         area,
         agent_view_label,
+        rows.iter().filter(|row| !row.agent.activity_only).count(),
         config,
         hits,
     ) {
         return;
     }
-    let rows = agent_rows(endpoints, active_endpoint_id, config);
     super::agent_sidebar::render_agent_list(
         buffer,
         area,

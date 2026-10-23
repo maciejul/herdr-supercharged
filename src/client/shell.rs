@@ -6,6 +6,7 @@ mod aggregate_navigation;
 mod automatic_names;
 mod background_activity;
 mod machine_diagnostics;
+mod resource_usage;
 mod workspace_navigation;
 use workspace_navigation::{PendingWorkspaceHighlight, WorkspaceNavigationTarget};
 mod completion_glow;

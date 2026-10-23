@@ -622,7 +622,8 @@ fn restore_tab(
             }
             let mut pane = PaneState::new(terminal_id);
             pane.suspended = saved_pane.is_some_and(|saved| saved.suspended);
-            pane.seen = !pane.suspended;
+            pane.seen = true;
+            pane.suspended_resume_requested = false;
             panes.insert(*id, pane);
             terminals.push(terminal);
             continue;

@@ -513,6 +513,10 @@ impl ClientShellState {
         {
             return (false, Vec::new());
         }
+        if matches!(pending.kind, PendingEndpointKind::ResourceUsage) {
+            self.resource_usage.complete(result);
+            return (true, Vec::new());
+        }
         if let PendingEndpointKind::PaneLinkResolve { target } = pending.kind {
             return self.complete_link_hover(target, result);
         }

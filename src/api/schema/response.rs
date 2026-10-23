@@ -277,6 +277,9 @@ pub enum ResponseResult {
         active: bool,
         projection_revision: u64,
     },
+    ResourceUsage {
+        sample: Option<crate::platform::resource_usage::ResourceUsage>,
+    },
     Ok {},
 }
 

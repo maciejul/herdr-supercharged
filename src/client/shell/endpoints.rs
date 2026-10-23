@@ -49,7 +49,11 @@ impl ClientShellState {
         for endpoint in &mut self.endpoints {
             if let Some(snapshot) = endpoint.snapshot.as_deref_mut() {
                 endpoint.original_names.restore(snapshot);
-                super::automatic_names::apply(snapshot, &self.config.preferences.customization);
+                endpoint.original_names.project(
+                    snapshot,
+                    None,
+                    &self.config.preferences.customization,
+                );
             }
         }
         let active = self.active_endpoint_id.clone();
@@ -582,9 +586,12 @@ impl ClientShellState {
         {
             return;
         }
-        self.endpoints[index].original_names =
-            super::automatic_names::OriginalNames::capture(&snapshot);
-        super::automatic_names::apply(&mut snapshot, &self.config.preferences.customization);
+        let endpoint = &mut self.endpoints[index];
+        endpoint.original_names.project(
+            &mut snapshot,
+            endpoint.snapshot.as_deref(),
+            &self.config.preferences.customization,
+        );
         let boot_changed = self.endpoints[index]
             .snapshot
             .as_deref()

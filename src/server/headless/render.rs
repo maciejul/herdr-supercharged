@@ -412,7 +412,7 @@ impl HeadlessServer {
             .map(|(_, pane)| &pane.attached_terminal_id)
     }
 
-    fn any_shell_surface_contains_pane(&self, pane_id: crate::layout::PaneId) -> bool {
+    pub(super) fn any_shell_surface_contains_pane(&self, pane_id: crate::layout::PaneId) -> bool {
         self.clients.iter().any(|(&client_id, client)| {
             if !client.is_active_shell_client() || client.writer.is_none() {
                 return false;

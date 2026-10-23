@@ -379,7 +379,7 @@ task yet. Divider lines are not clickable agent rows.
 
 Open **Settings → Customization** to enable or disable Space groups, show the
 selected tab's name beneath each Space, or use that tab name in place of the
-Space label. **Rename workspace when tab is renamed** also applies manual tab
+Space label for automatically named Spaces. An explicit custom Space name always takes precedence. **Rename workspace when tab is renamed** also applies manual tab
 renames to the containing workspace, after the tab rename succeeds; it is off by
 default. **Agent status dividers** shows or hides the labeled lines between agent
 states and is on by default. Disabling groups preserves saved membership. Tab display options
@@ -659,13 +659,13 @@ Automatic restores start one agent at a time, 100 milliseconds apart by default,
 
 Only panes with a valid native session reference from an official integration can resume; other panes restore as normal shells. See [Session state and restore](/docs/session-state/) for supported Agents and persistence behavior.
 
-### Unread session suspension
+### Read / idle session suspension
 
-In **Settings → customization → Suspend unread tabs after**, press Enter/apply to cycle through **Immediate, 1h, 4h, 8h, 24h (default), and 48h**. When that delay expires after an unread completion, Herdr closes the tab’s idle Claude/Codex processes and adds `(Suspended)` to its title. Opening the tab resumes the saved conversations and removes the suffix. Delayed checks run once per minute; Immediate runs on the next maintenance check, normally within one second.
+In **Settings → customization → Suspend read / idle tabs after**, press Enter/apply to cycle through **Immediate, 1h, 4h, 8h, 24h (default), and 48h**. When a read tab remains idle and out of view for that delay, Herdr closes the tab’s idle Claude/Codex processes and adds `(Suspended)` to its title. Opening the tab resumes the saved conversations and removes the suffix. Custom tab and workspace names are retained unchanged through suspension, resume, and session restore; `(Suspended)` is display-only and is never saved into the custom name. The connected client also retains conversation-derived names while suspended and until fresh conversation metadata arrives after resume. Delayed checks run once per minute; Immediate runs on the next maintenance check, normally within one second.
 
 The endpoint server saves this setting in its local state directory (`unread-suspension.json`) and applies changes immediately. Other running named sessions on the same machine pick up the saved value after configuration reload or restart. Older servers show the option as unavailable. Resetting client customization does not reset this server setting.
 
-Suspension requires an exact saved session identity. Tabs with working or blocked agents, reported background tasks, or agents without a supported resume identity stay running. Shell-only panes remain open. Suspended tabs survive server restarts when agent session restore is enabled; the unread countdown for running sessions starts again after a new unread completion.
+Suspension requires an exact saved session identity. Unread tabs, tabs viewed by any attached client, and tabs with working or blocked agents, reported background tasks, or agents without a supported resume identity stay running. Shell-only panes remain open. Suspended tabs survive server restarts when agent session restore is enabled; the read/idle countdown for running sessions starts again after restart. Reading or using a tab resets its inactivity timer. The legacy settings filename and command identifiers are retained for compatibility.
 
 ## IME cursor tracking
 
@@ -718,3 +718,10 @@ Common log files:
 ```
 
 Logs rotate automatically. Include the current log and rotated siblings when reporting issues.
+
+
+### Agent session count and resources
+
+The number centered between **agents** and **priority/grouped** counts the agent sessions in that panel, excluding ordinary terminal-task rows. Hover over it to show resource usage, or click to pin the popup. Escape or a click outside closes it.
+
+The popup reports Claude, Codex, and detected MCP process counts and memory for the current user on the selected machine, including processes outside this Herdr session. Linux uses proportional set size (PSS), so shared memory is not counted in full for every process. MCP counts include detected launcher/helpers; unrecognized MCP processes may be excluded. Permission failures or exited processes are shown as partial measurements. Sampling is cached for five seconds and happens outside rendering; the popup shows the sample age. Older servers and unsupported operating systems report unavailable rather than zero usage.

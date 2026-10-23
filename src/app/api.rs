@@ -947,6 +947,12 @@ impl App {
         };
 
         let response = match request.method {
+            Method::ServerResourceUsage(_) => SuccessResponse {
+                id: request.id,
+                result: ResponseResult::ResourceUsage {
+                    sample: crate::platform::resource_usage::cached(),
+                },
+            },
             Method::ServerStop(_) => {
                 self.state.should_quit = true;
                 SuccessResponse {

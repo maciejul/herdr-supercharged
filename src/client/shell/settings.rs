@@ -349,7 +349,7 @@ impl ClientShellState {
                         settings.tracking_pending = submitted;
                         settings.tracking_message = Some(
                             if submitted {
-                                "Updating unread suspension delay…"
+                                "Updating read / idle suspension delay…"
                             } else {
                                 "Unread suspension settings are unavailable on this machine."
                             }

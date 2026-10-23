@@ -834,3 +834,103 @@ fn output_accumulated_while_detached_visible_on_reattach() {
 
     cleanup_spawned_herdr(spawned, base);
 }
+
+#[test]
+fn resource_usage_api_samples_without_interrupting_server() {
+    let _lock = test_lock();
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let api_socket = runtime_dir.join("herdr.sock");
+    let client_socket = runtime_dir.join("herdr-client.sock");
+    let spawned = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
+    wait_for_socket(&api_socket, Duration::from_secs(10));
+    let ready = wait_until(Duration::from_secs(10), Duration::from_millis(100), || {
+        let response = send_json_request(
+            &api_socket,
+            r#"{"id":"resources","method":"server.resource_usage","params":{}}"#,
+        );
+        assert_eq!(response["result"]["type"], "resource_usage");
+        let sample = &response["result"]["sample"];
+        if sample.is_null() {
+            return false;
+        }
+        for kind in ["claude", "codex", "mcp"] {
+            assert!(sample[kind]["processes"].is_u64());
+            assert!(
+                sample[kind]["measured"].as_u64().unwrap()
+                    <= sample[kind]["processes"].as_u64().unwrap()
+            );
+            assert!(sample[kind]["memory_bytes"].is_u64());
+        }
+        true
+    });
+    assert!(
+        ready,
+        "resource sampler should return a sample or explicit platform error"
+    );
+    assert!(ping_socket(&api_socket).contains("pong"));
+    cleanup_spawned_herdr(spawned, base);
+}
+
+#[test]
+fn suspended_custom_names_survive_server_restore_and_rename() {
+    let _lock = test_lock();
+    let base = unique_test_dir();
+    let config_home = base.join("config");
+    let runtime_dir = base.join("runtime");
+    let api_socket = runtime_dir.join("herdr.sock");
+    let client_socket = runtime_dir.join("herdr-client.sock");
+    let data_dir = config_home.join(if cfg!(debug_assertions) {
+        "herdr-dev"
+    } else {
+        "herdr"
+    });
+    fs::create_dir_all(&data_dir).unwrap();
+    let saved = serde_json::json!({
+        "version": 3, "active": 0, "selected": 0,
+        "workspaces": [{
+            "custom_name": "My custom workspace", "identity_cwd": base,
+            "tabs": [{
+                "custom_name": "My custom tab", "layout": {"Pane": 1},
+                "zoomed": false, "focused": 1, "root_pane": 1,
+                "panes": {"1": {"cwd": base, "suspended": true,
+                    "agent_session": {"source": "herdr:claude", "agent": "claude", "kind": "id", "value": "name-preservation-test"}
+                }}
+            }]
+        }]
+    });
+    fs::write(
+        data_dir.join("session.json"),
+        serde_json::to_vec(&saved).unwrap(),
+    )
+    .unwrap();
+    let spawned = spawn_server(&config_home, &runtime_dir, &api_socket, &client_socket);
+    wait_for_socket(&api_socket, Duration::from_secs(10));
+    let workspaces = workspace_list(&api_socket);
+    let workspace_id = workspace_id_by_label(&workspaces, "My custom workspace");
+    let request = |method: &str, params: Value| {
+        send_json_request(
+            &api_socket,
+            &serde_json::json!({"id":"names", "method":method, "params":params}).to_string(),
+        )
+    };
+    let tabs = request("tab.list", serde_json::json!({"workspace_id":workspace_id}));
+    let tab = &tabs["result"]["tabs"][0];
+    assert_eq!(tab["label"], "My custom tab (Suspended)");
+    let renamed = request(
+        "tab.rename",
+        serde_json::json!({"tab_id":tab["tab_id"], "label":"Renamed task"}),
+    );
+    assert!(renamed.get("error").is_none(), "{renamed}");
+    let tabs = request("tab.list", serde_json::json!({"workspace_id":workspace_id}));
+    assert_eq!(
+        tabs["result"]["tabs"][0]["label"],
+        "Renamed task (Suspended)"
+    );
+    assert_eq!(
+        workspace_list(&api_socket)["result"]["workspaces"][0]["label"],
+        "My custom workspace"
+    );
+    cleanup_spawned_herdr(spawned, base);
+}
