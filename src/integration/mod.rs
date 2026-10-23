@@ -67,7 +67,7 @@ const CODEX_HOOK_ASSET: &str = if cfg!(windows) {
 } else {
     include_str!("assets/codex/herdr-agent-state.sh")
 };
-const CODEX_INTEGRATION_VERSION: u32 = if cfg!(unix) { 11 } else { 10 };
+const CODEX_INTEGRATION_VERSION: u32 = if cfg!(unix) { 12 } else { 10 };
 const KIMI_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
     "herdr-agent-state.ps1"
 } else {

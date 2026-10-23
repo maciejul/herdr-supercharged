@@ -19,13 +19,18 @@ import time
 TOKEN = "herdr_background_activity"
 
 
-def update(items, event):
+def update(items, event, agent="claude"):
     """Apply a hook event; callers serialize concurrent updates under a lock."""
     name = event.get("hook_event_name")
     agent_id = event.get("agent_id")
     if name == "SessionEnd":
         items.clear()
     elif name in ("Stop", "StopFailure", "Interrupt"):
+        # Native Codex Bash hooks pair the initial PreToolUse with a final
+        # PostToolUse only after the process exits. Yielded exec sessions have
+        # no intermediate hook, so their call entries can outlive the turn.
+        if agent == "codex" and name == "Stop":
+            return
         for key in list(items):
             if key.startswith("call:"):
                 items.pop(key, None)
@@ -166,6 +171,116 @@ def reconcile_transcript(saved):
         pass
 
 
+def process_identity(path):
+    """Read a Linux process generation; unknown reads propagate conservatively."""
+    try:
+        stat = (path / "stat").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    fields = stat.rsplit(")", 1)[1].split()
+    if fields[0] in ("Z", "X"):
+        return None
+    return int(fields[19])  # /proc stat field 22, start time since boot
+
+
+def codex_processes(session, call_ids):
+    """One bounded same-user scan for all pending calls; never retain environment."""
+    found = {call_id: [] for call_id in call_ids}
+    session_marker = b"CODEX_SESSION_ID=" + session.encode()
+    call_markers = {b"CODEX_TOOL_CALL_ID=" + call_id.encode(): call_id for call_id in call_ids}
+    deadline = time.monotonic() + 0.1
+    complete = True
+    inspected = 0
+    try:
+        with os.scandir("/proc") as entries:
+            for entry in entries:
+                if not entry.name.isdigit():
+                    continue
+                inspected += 1
+                if inspected > 4096 or time.monotonic() >= deadline:
+                    complete = False
+                    break
+                path = Path(entry.path)
+                try:
+                    if entry.stat().st_uid != os.getuid():
+                        continue
+                    identity = process_identity(path)
+                    if identity is None:
+                        continue
+                    try:
+                        with (path / "environ").open("rb") as stream:
+                            environment = stream.read(65537)
+                    except PermissionError:
+                        # An unrelated protected process is not evidence of call
+                        # ownership. Cached owned identities are checked separately.
+                        continue
+                    if len(environment) > 65536:
+                        complete = False
+                        continue
+                    values = set(environment.split(b"\0"))
+                    if session_marker not in values:
+                        continue
+                    for marker in values.intersection(call_markers):
+                        if process_identity(path) == identity:
+                            found[call_markers[marker]].append([int(entry.name), identity])
+                except FileNotFoundError:
+                    continue  # exited while scanning
+                except (OSError, ValueError, IndexError):
+                    complete = False
+    except OSError:
+        complete = False
+    return found, complete
+
+
+def reconcile_codex_processes(saved):
+    """Track observed native command processes outside renderer work.
+
+    Unobserved or unreadable calls retain hook-only behavior. PID start times
+    prevent reuse from keeping an unrelated process attached to an old call.
+    """
+    if sys.platform != "linux":
+        return
+    items = saved["items"]
+    tracked = saved.setdefault("codex_calls", {})
+    for key in list(tracked):
+        if key not in items:
+            tracked.pop(key, None)
+    pending = {}
+    for key in items:
+        if not key.startswith("call:"):
+            continue
+        entry = tracked.setdefault(key, {"attempts": 0})
+        processes = entry.get("processes", [])
+        if processes:
+            alive_or_unknown = False
+            for pid, start in processes:
+                try:
+                    if process_identity(Path("/proc") / str(pid)) == start:
+                        alive_or_unknown = True
+                        break
+                except (OSError, ValueError, IndexError):
+                    alive_or_unknown = True
+                    break
+            if alive_or_unknown:
+                continue
+        # Discovery and exit confirmation each get at most ten heartbeat scans.
+        # A confirmation scan catches children forked after the initial capture.
+        if entry["attempts"] < 10:
+            pending[key[5:]] = key
+    if not pending:
+        return
+    found, complete = codex_processes(str(saved["session"]), pending)
+    for call_id, key in pending.items():
+        entry = tracked[key]
+        entry["attempts"] += 1
+        if found[call_id]:
+            entry["processes"] = found[call_id]
+            entry["attempts"] = 0
+        elif entry.get("processes") and complete:
+            items.pop(key, None)
+            tracked.pop(key, None)
+
+
 def monitor(path, pane, sock, agent):
     # One heartbeat/reconciliation worker per pane, independent of render frequency.
     with open(str(path) + ".monitor", "a") as guard:
@@ -179,7 +294,10 @@ def monitor(path, pane, sock, agent):
                 fcntl.flock(state, fcntl.LOCK_EX)
                 saved = json.load(state)
                 if refresh_control(saved):
-                    reconcile_transcript(saved)
+                    if agent == "codex":
+                        reconcile_codex_processes(saved)
+                    else:
+                        reconcile_transcript(saved)
                 report(saved["items"], pane, sock, agent)
                 state.seek(0)
                 state.truncate()
@@ -228,8 +346,9 @@ def main():
                     saved["offset"] = 0
         items = saved["items"]
         if refresh_control(saved):
-            reconcile_transcript(saved)
-            update(items, event)
+            if agent != "codex":
+                reconcile_transcript(saved)
+            update(items, event, agent)
         refresh_control(saved)
         # Never clear background work on Stop: it may intentionally outlive a turn.
         state.seek(0)

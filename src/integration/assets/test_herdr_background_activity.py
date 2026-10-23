@@ -11,6 +11,8 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
+import uuid
 
 SCRIPT = Path(__file__).with_name("herdr-background-activity.py")
 spec = importlib.util.spec_from_file_location("activity", SCRIPT)
@@ -46,7 +48,7 @@ class LifecycleTests(unittest.TestCase):
         activity.update(items, {"hook_event_name": "PostToolUse", "tool_name": "TaskOutput", "tool_input": {"task_id": "b"}, "tool_response": {"task": {"status": "completed"}}})
         self.assertEqual(items, {})
 
-    def test_codex_yield_and_completion(self):
+    def test_legacy_model_facing_yield_and_completion(self):
         items = {}
         activity.update(items, {"hook_event_name": "PostToolUse", "tool_name": "functions.exec_command", "tool_input": {}, "tool_response": "Process running with session ID 123"})
         self.assertIn("task:123", items)
@@ -90,6 +92,90 @@ class LifecycleTests(unittest.TestCase):
             self.assertEqual(saved["items"], {})
 
 
+@unittest.skipUnless(sys.platform == "linux", "Linux native process identity")
+class CodexProcessTests(unittest.TestCase):
+    def spawn(self, session, call):
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            env=dict(os.environ, CODEX_SESSION_ID=session, CODEX_TOOL_CALL_ID=call),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(self.stop, process)
+        return process
+
+    @staticmethod
+    def stop(process):
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=5)
+
+    def saved(self):
+        return {"session": str(uuid.uuid4()), "items": {"call:probe": {"id": "call:probe", "kind": "task", "label": "Shell command"}}}
+
+    def test_observed_processes_clear_only_after_all_matching_processes_exit(self):
+        saved = self.saved()
+        first = self.spawn(saved["session"], "probe")
+        second = self.spawn(saved["session"], "probe")
+        activity.reconcile_codex_processes(saved)
+        self.assertEqual({pid for pid, _ in saved["codex_calls"]["call:probe"]["processes"]}, {first.pid, second.pid})
+        self.stop(first)
+        activity.reconcile_codex_processes(saved)
+        self.assertIn("call:probe", saved["items"])
+        self.stop(second)
+        activity.reconcile_codex_processes(saved)
+        self.assertEqual(saved["items"], {})
+
+    def test_exit_confirmation_keeps_matching_process_started_after_capture(self):
+        saved = self.saved()
+        first = self.spawn(saved["session"], "probe")
+        activity.reconcile_codex_processes(saved)
+        second = self.spawn(saved["session"], "probe")
+        self.stop(first)
+        activity.reconcile_codex_processes(saved)
+        self.assertIn("call:probe", saved["items"])
+        self.assertEqual({pid for pid, _ in saved["codex_calls"]["call:probe"]["processes"]}, {second.pid})
+        self.stop(second)
+        activity.reconcile_codex_processes(saved)
+        self.assertEqual(saved["items"], {})
+
+    def test_unreadable_cached_identity_does_not_claim_completion(self):
+        saved = self.saved()
+        process = self.spawn(saved["session"], "probe")
+        activity.reconcile_codex_processes(saved)
+        self.stop(process)
+        with mock.patch.object(activity, "process_identity", side_effect=PermissionError):
+            activity.reconcile_codex_processes(saved)
+        self.assertIn("call:probe", saved["items"])
+
+    def test_unobserved_call_and_other_session_never_claim_completion(self):
+        saved = self.saved()
+        self.spawn(str(uuid.uuid4()), "probe")
+        with mock.patch.object(activity, "codex_processes", wraps=activity.codex_processes) as scan:
+            for _ in range(12):
+                activity.reconcile_codex_processes(saved)
+            self.assertEqual(scan.call_count, 10)
+        self.assertIn("call:probe", saved["items"])
+        self.assertNotIn("processes", saved["codex_calls"]["call:probe"])
+
+    def test_process_generation_and_session_prevent_unrelated_pid_retention(self):
+        saved = self.saved()
+        foreign = self.spawn(str(uuid.uuid4()), "probe")
+        start = activity.process_identity(Path("/proc") / str(foreign.pid))
+        saved["codex_calls"] = {"call:probe": {"attempts": 0, "processes": [[foreign.pid, start - 1]]}}
+        activity.reconcile_codex_processes(saved)
+        self.assertEqual(saved["items"], {})
+        self.assertIsNone(foreign.poll())
+
+    def test_incomplete_exit_scan_preserves_observed_call(self):
+        saved = self.saved()
+        process = self.spawn(saved["session"], "probe")
+        activity.reconcile_codex_processes(saved)
+        self.stop(process)
+        with mock.patch.object(activity, "codex_processes", return_value=({"probe": []}, False)):
+            activity.reconcile_codex_processes(saved)
+        self.assertIn("call:probe", saved["items"])
+
+
 class HookSocketTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="herdr-hook-test-")
@@ -125,8 +211,8 @@ class HookSocketTests(unittest.TestCase):
                 self.requests.append(json.loads(line))
                 client.sendall(b'{"id":"herdr-background","result":{}}\n')
 
-    def hook(self, event, **environment):
-        result = subprocess.run([sys.executable, str(self.script), "claude"], input=json.dumps(dict(session_id="parent", **event)), text=True, capture_output=True, env=dict(self.env, **environment), timeout=5)
+    def hook(self, event, agent="claude", **environment):
+        result = subprocess.run([sys.executable, str(self.script), agent], input=json.dumps(dict(session_id="parent", **event)), text=True, capture_output=True, env=dict(self.env, **environment), timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {})
         return result
@@ -144,6 +230,71 @@ class HookSocketTests(unittest.TestCase):
             list(pool.map(lambda n: self.hook({"hook_event_name": "SubagentStop", "agent_id": str(n)}), range(11)))
         self.assertEqual([item["id"] for item in self.last_items()], ["11"])
         self.hook({"hook_event_name": "SessionEnd"})
+        self.assertEqual(self.last_items(), [])
+
+    def test_native_codex_background_command_survives_turn_stop_until_final_post_hook(self):
+        self.hook({"hook_event_name": "SessionStart"}, agent="codex")
+        command = {"tool_name": "Bash", "tool_use_id": "call-parent", "tool_input": {"command": "sleep 45"}}
+        self.hook(dict(command, hook_event_name="PreToolUse"), agent="codex")
+        self.assertEqual([item["id"] for item in self.last_items()], ["call:call-parent"])
+        # Codex emits no PostToolUse when exec yields a running process. A turn
+        # may finish while that command remains alive in its background terminal.
+        self.hook({"hook_event_name": "Stop", "turn_id": "turn-1", "stop_hook_active": False}, agent="codex")
+        self.assertEqual([item["id"] for item in self.last_items()], ["call:call-parent"])
+        self.assertEqual(self.requests[-1]["params"]["source"], "herdr:background:codex")
+        # Completion uses the original call ID, Bash name and raw command output,
+        # including empty output; it has no session_id/exit_code response object.
+        self.hook(dict(command, hook_event_name="PostToolUse", tool_response=""), agent="codex")
+        self.assertEqual(self.last_items(), [])
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux native process identity")
+    def test_native_codex_monitor_clears_exited_command_without_another_hook(self):
+        self.hook({"hook_event_name": "SessionStart"}, agent="codex")
+        self.hook({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "real-process", "tool_input": {"command": "sleep 30"}}, agent="codex")
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            env=dict(os.environ, CODEX_SESSION_ID="parent", CODEX_TOOL_CALL_ID="real-process"),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(CodexProcessTests.stop, process)
+        self.hook({"hook_event_name": "Stop"}, agent="codex")
+        state_dir = Path(self.tmp.name) / ("herdr-activity-" + str(os.getuid()))
+        deadline = time.monotonic() + 4
+        observed = False
+        while time.monotonic() < deadline:
+            for path in state_dir.glob("*.json"):
+                try:
+                    saved = json.loads(path.read_text())
+                except (OSError, ValueError):
+                    continue
+                observed = bool(saved.get("codex_calls", {}).get("call:real-process", {}).get("processes"))
+            if observed:
+                break
+            time.sleep(0.05)
+        self.assertTrue(observed, "monitor must capture the real native process before exit")
+        self.assertEqual([item["id"] for item in self.last_items()], ["call:real-process"])
+        CodexProcessTests.stop(process)
+        # No PostToolUse, Stop, or other hook occurs after process exit.
+        self.wait_for_empty()
+
+    def test_claude_turn_stop_still_clears_unfinished_foreground_call(self):
+        self.hook({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "call-claude", "tool_input": {"command": "sleep 45"}})
+        self.assertEqual([item["id"] for item in self.last_items()], ["call:call-claude"])
+        self.hook({"hook_event_name": "Stop"})
+        self.assertEqual(self.last_items(), [])
+
+    def test_native_codex_subagent_stop_keeps_other_commands_and_completes_by_call_id(self):
+        self.hook({"hook_event_name": "SessionStart"}, agent="codex")
+        self.hook({"hook_event_name": "SubagentStart", "agent_id": "child", "agent_type": "worker"}, agent="codex")
+        parent = {"tool_name": "Bash", "tool_use_id": "parent-call", "tool_input": {"command": "sleep 45"}}
+        child = {"tool_name": "Bash", "tool_use_id": "child-call", "tool_input": {"command": "sleep 60"}, "agent_id": "child", "agent_type": "worker"}
+        for command in (parent, child):
+            self.hook(dict(command, hook_event_name="PreToolUse"), agent="codex")
+        self.hook({"hook_event_name": "SubagentStop", "agent_id": "child", "agent_type": "worker"}, agent="codex")
+        self.assertEqual({item["id"] for item in self.last_items()}, {"call:parent-call", "call:child-call"})
+        self.hook(dict(child, hook_event_name="PostToolUse", tool_response="completed"), agent="codex")
+        self.assertEqual([item["id"] for item in self.last_items()], ["call:parent-call"])
+        self.hook({"hook_event_name": "SessionEnd"}, agent="codex")
         self.assertEqual(self.last_items(), [])
 
     def test_monitor_clears_completed_background_task_without_another_hook(self):

@@ -430,7 +430,7 @@ When Local is the only machine, Spaces and groups are shown directly without a
 machine heading. Machine headings appear when additional machines are configured.
 
 Click **+ group** in the desktop Spaces header to create a named group. Right-click
-a Space and choose **Move to group...**. Use Up/Down and Enter to choose an existing
+a Space and choose **Move to group**. Use Up/Down and Enter to choose an existing
 group, or type a new group name. You can also drag a Space onto a group header to
 assign it to that group on the same machine.
 Multiple Spaces can belong to a group; each Space belongs to at most one group.
@@ -452,6 +452,37 @@ shown in the expanded desktop sidebar; the compact sidebar and mobile views keep
 their flat workspace lists. While named groups exist, use the membership menu
 to assign membership or drag a Space onto a group header. Flat list reordering
 remains available when groups are disabled or absent.
+
+**Codex background activity and shared-daemon routing**
+
+With Codex CLI 0.164.0, use `codex --no-daemon` inside Herdr. Its shared daemon
+captures the environment of the process that first started it, so hooks can keep
+reporting to an old Herdr pane instead of the CLI's current pane. Dedicated mode
+keeps session identity, subagent activity, and shell-command reports associated
+with the correct Space. Existing shared-daemon sessions need to be reopened in
+this mode; stopping the shared daemon is unnecessary.
+
+For zsh, this checkout provides `scripts/codex-herdr.zsh`. Source it from
+`~/.zshrc` to make plain `codex`, `codex resume`, and `codex fork` use dedicated
+mode inside Herdr. It preserves administrative commands, explicit remote mode,
+and launches outside Herdr. Open a new terminal or source the helper in an
+existing shell to activate it. `command codex` bypasses the helper; ambiguous
+options are passed through unchanged, so add `--no-daemon` explicitly when needed.
+
+For a saved conversation, use `codex resume <session-id> --no-daemon`. For
+`herdr agent start`, pass `--no-daemon` after the agent-argument `--` separator.
+Older Codex versions may not support this flag; check `codex --help` first.
+
+Codex reports a running shell command at `PreToolUse` and its completion at the
+final `PostToolUse`, even if it yielded as a background terminal in between.
+Herdr keeps that activity visible across a completed parent turn. On Linux, the
+reporting helper also tracks observed processes by their native Codex session and
+tool-call IDs, clearing finished commands even when Codex emits no completion
+hook until the job is polled. Discovery is bounded and runs outside rendering;
+unobserved or unreadable processes retain hook-based behavior. Other Unix systems
+rely on completion hooks. Subagents remain visible until their stop event. When both
+are running, the collapsed activity row prioritizes the subagent count; expand
+it to see the individual tasks as well.
 
 **Automatic conversation names**
 
