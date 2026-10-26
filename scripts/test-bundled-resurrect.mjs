@@ -80,6 +80,11 @@ try {
   await invoke('save');
   await invoke('restore-preview');
   await invoke('restore');
+  const controlPid = cli('pane', 'process-info', '--pane', 'w2:p1').process_info.shell_pid;
+  assert.ok(controlPid);
+  cli('server', 'live-handoff', '--import-exe', bin);
+  assert.equal(cli('pane', 'process-info', '--pane', 'w2:p1').process_info.shell_pid, controlPid,
+    'Live handoff must preserve the running control shell');
   const after = cli('api', 'snapshot').snapshot;
   assert.equal(after.focused_tab_id, before.focused_tab_id);
   assert.equal(after.workspaces.length, before.workspaces.length);
@@ -91,7 +96,7 @@ try {
   const agent = snap.workspaces.flatMap(w => w.tabs.flatMap(t => t.panes)).find(p => p.pane_id === 'w1:p1');
   assert.equal(agent.suspended, true);
   assert.equal(agent.agent.session.value, exact);
-  console.log('PASS: bundled offline install, native deferred restore, plugin save/preview/restore preserve exact ID, suspension, names, topology and focus.');
+  console.log('PASS: bundled offline install, native deferred restore, plugin save/preview/restore and live handoff preserve exact ID, suspension, names, topology, focus and running shell.');
 } finally {
   if (fs.existsSync(cliEnv.HERDR_SOCKET_PATH)) cli('server', 'stop');
   if (server.exitCode === null) await new Promise(resolve => server.once('exit', resolve));
