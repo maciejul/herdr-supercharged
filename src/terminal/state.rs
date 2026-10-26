@@ -1302,6 +1302,30 @@ impl TerminalState {
             })
     }
 
+    pub(crate) fn resumable_session_for_persistence(
+        &self,
+    ) -> Option<crate::agent_resume::PersistedAgentSession> {
+        // A pending native resume owns the suspended/restored pane even if a
+        // shutdown hook cleared the old process's reporting authority.
+        if let Some(session) = self
+            .pending_agent_resume_plan
+            .as_ref()
+            .and_then(crate::agent_resume::session_from_pending_plan)
+        {
+            return Some(session);
+        }
+        if let Some(authority) = &self.hook_authority {
+            if let Some(session_ref) = &authority.session_ref {
+                return Some(crate::agent_resume::PersistedAgentSession {
+                    source: authority.source.clone(),
+                    agent: authority.agent_label.clone(),
+                    session_ref: session_ref.clone(),
+                });
+            }
+        }
+        self.persisted_agent_session.clone()
+    }
+
     fn current_session_identity_for_persistence(
         &self,
     ) -> Option<(

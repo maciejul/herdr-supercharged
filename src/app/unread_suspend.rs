@@ -201,6 +201,9 @@ impl App {
         let changed = !candidates.is_empty();
         for (pane_id, terminal_id, plan) in candidates {
             if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
+                if let Some(session) = crate::agent_resume::session_from_pending_plan(&plan) {
+                    terminal.set_persisted_agent_session(session);
+                }
                 terminal.pending_agent_resume_plan = Some(plan);
             }
             for ws in &mut self.state.workspaces {
@@ -227,6 +230,9 @@ impl App {
             | AppEvent::AgentProcessDetected { pane_id, .. }
             | AppEvent::HookStateReported { pane_id, .. }
             | AppEvent::AgentSessionReported { pane_id, .. }
+            | AppEvent::HookAuthorityCleared { pane_id, .. }
+            | AppEvent::HookAgentReleased { pane_id, .. }
+            | AppEvent::AgentResumeReported { pane_id, .. }
             | AppEvent::ReportedAgentShellReturned { pane_id, .. } => *pane_id,
             _ => return false,
         };
@@ -503,6 +509,151 @@ mod tests {
         std::fs::write(&path, "123").unwrap();
         assert_eq!(load_delay_at(&path), DEFAULT_DELAY_SECONDS);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn suspended_session_survives_late_exit_hooks_and_snapshot_roundtrip() {
+        for agent in [Agent::Claude, Agent::Codex] {
+            for event_kind in ["clear", "release", "resume"] {
+                let now = Instant::now();
+                let (mut app, pane_id, terminal_id) = setup(now, agent);
+                let label = crate::detect::agent_label(agent);
+                let source = "suspension-test-hook".to_string();
+                app.handle_internal_event(AppEvent::HookStateReported {
+                    pane_id,
+                    source: source.clone(),
+                    agent_label: label.into(),
+                    state: AgentState::Idle,
+                    session_ref: None,
+                    message: None,
+                    seq: None,
+                });
+                app.state
+                    .terminals
+                    .get_mut(&terminal_id)
+                    .unwrap()
+                    .restore_reported_resume(crate::agent_resume::ReportedAgentResume {
+                        source: source.clone(),
+                        agent: label.into(),
+                        argv: vec![label.into(), "--continue".into()],
+                    });
+                assert!(app.suspend_unread_agents(now + UNREAD_TIMEOUT));
+                let event = match event_kind {
+                    "clear" => AppEvent::HookAuthorityCleared {
+                        pane_id,
+                        source: Some(source),
+                        seq: None,
+                    },
+                    "release" => AppEvent::HookAgentReleased {
+                        pane_id,
+                        source,
+                        agent_label: label.into(),
+                        known_agent: Some(agent),
+                        seq: None,
+                    },
+                    _ => AppEvent::AgentResumeReported {
+                        pane_id,
+                        source,
+                        agent_label: label.into(),
+                        seq: None,
+                        argv: vec![label.into(), "--continue".into()],
+                    },
+                };
+                app.handle_internal_event(event);
+                let snapshot = crate::persist::capture(
+                    &app.state.workspaces,
+                    &app.state.terminals,
+                    &app.terminal_runtimes,
+                    app.state.active,
+                    app.state.selected,
+                );
+                let saved = &snapshot.workspaces[0].tabs[0].panes[&pane_id.raw()];
+                assert_eq!(
+                    saved.agent_session.as_ref().map(|s| s.value.as_str()),
+                    Some("suspension-test-session"),
+                    "{label}: {event_kind}"
+                );
+                assert!(
+                    saved.agent_resume.is_none(),
+                    "late resume must not replace exact identity"
+                );
+                let public = app.pane_info(0, pane_id).unwrap();
+                assert_eq!(
+                    public.agent_session.unwrap().value,
+                    "suspension-test-session"
+                );
+                assert!(app.state.terminals[&terminal_id]
+                    .pending_agent_resume_plan
+                    .is_some());
+                assert!(app.terminal_runtimes.get(&terminal_id).is_none());
+                // Migration case: old servers retained the exact pending plan
+                // after shutdown hooks erased both identity reporting fields.
+                let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+                terminal.hook_authority = None;
+                terminal.persisted_agent_session = None;
+                let captured = crate::persist::capture(
+                    &app.state.workspaces,
+                    &app.state.terminals,
+                    &app.terminal_runtimes,
+                    app.state.active,
+                    app.state.selected,
+                );
+                let serialized = serde_json::to_string(&captured).unwrap();
+                let mut captured: crate::persist::SessionSnapshot =
+                    serde_json::from_str(&serialized).unwrap();
+                // Older snapshots may contain both an exact ID and an ambiguous
+                // reported command. Native suspension must prefer the ID.
+                captured.workspaces[0].tabs[0]
+                    .panes
+                    .get_mut(&pane_id.raw())
+                    .unwrap()
+                    .agent_resume = Some(
+                    serde_json::from_value(serde_json::json!({
+                        "source": "old-hook", "agent": label,
+                        "argv": [label, "--continue"],
+                    }))
+                    .unwrap(),
+                );
+                let (tx, _) = tokio::sync::mpsc::channel(32);
+                let (workspaces, terminals, runtimes) = crate::persist::restore(
+                    &captured,
+                    None,
+                    24,
+                    80,
+                    0,
+                    &app.state.default_shell,
+                    app.state.shell_mode,
+                    false,
+                    tx,
+                    std::sync::Arc::new(tokio::sync::Notify::new()),
+                    std::sync::Arc::new(crate::render_signal::RenderSignal::new()),
+                );
+                let restored = workspaces[0].tabs[0].panes.values().next().unwrap();
+                assert!(restored.suspended && !restored.suspended_resume_requested);
+                let terminal = &terminals[&restored.attached_terminal_id];
+                assert_eq!(
+                    terminal
+                        .persisted_agent_session
+                        .as_ref()
+                        .unwrap()
+                        .session_ref
+                        .value,
+                    "suspension-test-session"
+                );
+                assert_eq!(
+                    terminal
+                        .pending_agent_resume_plan
+                        .as_ref()
+                        .unwrap()
+                        .argv
+                        .last()
+                        .unwrap(),
+                    "suspension-test-session"
+                );
+                assert!(!runtimes.contains_key(&restored.attached_terminal_id));
+                drop(runtimes);
+            }
+        }
     }
 
     #[tokio::test]

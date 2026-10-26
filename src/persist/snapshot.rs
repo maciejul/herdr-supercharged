@@ -352,28 +352,16 @@ fn capture_tab(
             })
             .unwrap_or_default();
         let launch_argv = terminal.and_then(|terminal| terminal.launch_argv.clone());
-        let agent_session = terminal.and_then(|terminal| {
-            if let Some(authority) = terminal.hook_authority.as_ref() {
-                if let Some(session_ref) = authority.session_ref.as_ref() {
-                    return Some(PaneAgentSessionSnapshot {
-                        source: authority.source.clone(),
-                        agent: authority.agent_label.clone(),
-                        kind: session_ref.kind,
-                        value: session_ref.value.clone(),
-                    });
-                }
-            }
-            terminal
-                .persisted_agent_session
-                .as_ref()
-                .map(|session| PaneAgentSessionSnapshot {
-                    source: session.source.clone(),
-                    agent: session.agent.clone(),
-                    kind: session.session_ref.kind,
-                    value: session.session_ref.value.clone(),
-                })
-        });
+        let agent_session = terminal
+            .and_then(|terminal| terminal.resumable_session_for_persistence())
+            .map(|session| PaneAgentSessionSnapshot {
+                source: session.source,
+                agent: session.agent,
+                kind: session.session_ref.kind,
+                value: session.session_ref.value,
+            });
         let agent_resume = terminal
+            .filter(|_| !tab.panes.get(id).is_some_and(|pane| pane.suspended))
             .and_then(|terminal| terminal.reported_resume())
             .map(|resume| PaneAgentResumeSnapshot {
                 source: resume.source.clone(),

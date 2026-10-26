@@ -34,6 +34,23 @@ Keep inherited upstream publishing workflows disabled unless separately audited.
 
 ## Assets and compatibility
 
+Private builds include the MIT-licensed `ntindle/herdr-resurrect` add-on inside
+the executable. A fresh server installs it locally without GitHub access; Node.js
+16+ must be on PATH, with bash/fzf additionally needed for saved-space overlays.
+There are no npm dependencies. Existing explicit plugin installations are kept,
+and a disabled bundled plugin stays disabled across upgrades. User settings and
+snapshots stay in the normal plugin directories. Auto-restore defaults to off.
+
+Suspended tabs retain exact Claude/Codex session IDs through shutdown hooks and
+native save/restore. A native pending resume plan can recover reporting metadata
+lost by older code; directory-wide "continue" commands never override a suspended
+tab's exact conversation. Manual resume remains available when automatic startup
+resume is disabled. The add-on leaves suspended tabs to native Herdr recovery.
+See `vendor/herdr-resurrect/PRIVATE-COMPATIBILITY.md` for provenance and limitations.
+
+Validate the distribution with `just bundled-resurrect-test`; it checks a fresh
+offline install and real plugin save/preview/restore against a disposable server.
+
 - `herdr-linux-x86_64`: optimized `x86_64-unknown-linux-gnu` executable.
 - `SHA256SUMS`: checksums for the executable and build metadata.
 - `build-metadata.json`: repository, tag, commit, target, runner, timestamp, and

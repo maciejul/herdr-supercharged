@@ -200,6 +200,9 @@ fn load_plugin_registry(
     if !persist_plugin_registry {
         return std::collections::HashMap::new();
     }
+    if let Err(err) = crate::bundled_resurrect::ensure_installed() {
+        tracing::warn!(%err, "failed to install bundled resurrect plugin");
+    }
     let entries = crate::plugin_installations::load(leases).unwrap_or_else(|err| {
         tracing::warn!(%err, "failed to load plugin installations");
         Vec::new()

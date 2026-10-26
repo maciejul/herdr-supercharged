@@ -95,6 +95,21 @@ pub struct PersistedAgentSession {
     pub session_ref: AgentSessionRef,
 }
 
+/// Recover only an exact native suspended-session plan, never a cwd-wide continue.
+pub(crate) fn session_from_pending_plan(plan: &AgentResumePlan) -> Option<PersistedAgentSession> {
+    if !matches!(plan.agent.as_str(), "claude" | "codex") || plan.argv.len() != 3 {
+        return None;
+    }
+    let source = format!("herdr:{}", plan.agent);
+    let session_ref = AgentSessionRef::id(&plan.argv[2])?;
+    let expected = self::plan(&source, &plan.agent, &session_ref)?;
+    (expected == *plan).then(|| PersistedAgentSession {
+        source,
+        agent: plan.agent.clone(),
+        session_ref,
+    })
+}
+
 impl AgentSessionRef {
     pub fn id(value: impl Into<String>) -> Option<Self> {
         let value = value.into();
@@ -363,6 +378,27 @@ fn valid_session_path(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_native_session_recovery_rejects_ambiguous_or_mismatched_plans() {
+        for agent in ["claude", "codex"] {
+            let session = AgentSessionRef::id("exact-session").unwrap();
+            let native = plan(&format!("herdr:{agent}"), agent, &session).unwrap();
+            assert_eq!(
+                session_from_pending_plan(&native).unwrap().session_ref,
+                session
+            );
+            let mut ambiguous = native.clone();
+            ambiguous.argv = vec![agent.into(), "--continue".into()];
+            assert!(session_from_pending_plan(&ambiguous).is_none());
+            let mut wrong_identity = native.clone();
+            wrong_identity.dedupe_key.push_str("-different");
+            assert!(session_from_pending_plan(&wrong_identity).is_none());
+            let mut extra_args = native;
+            extra_args.argv.push("--another-session".into());
+            assert!(session_from_pending_plan(&extra_args).is_none());
+        }
+    }
 
     fn absolute_test_path(name: &str) -> String {
         std::env::current_dir()

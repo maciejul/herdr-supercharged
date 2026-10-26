@@ -124,9 +124,16 @@ docs-contract-test:
 
 # Test bundled agent integration assets
 integration-assets-test:
+    node vendor/herdr-resurrect/test/suspension.test.js
     bun test src/integration/assets/herdr-agent-state.test.ts
     bun test src/integration/assets/opencode/herdr-agent-state.test.ts
     bun test src/integration/assets/opencode/herdr-tui-session.test.ts
+
+# Live private-distribution test; creates and stops only a disposable server.
+[unix]
+bundled-resurrect-test:
+    cargo build --locked --bin herdr
+    node scripts/test-bundled-resurrect.mjs "${CARGO_TARGET_DIR:-target}/debug/herdr"
 
 # Regenerate the C API bindings with bindgen-cli 0.72.1
 libghostty-bindings *clang_args:

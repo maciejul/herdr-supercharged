@@ -539,12 +539,17 @@ fn restore_tab(
             .and_then(crate::detect::parse_canonical_agent_label);
         let saved_launch_argv = saved_pane.and_then(|p| p.launch_argv.clone());
         let saved_agent_session = saved_pane.and_then(|p| p.agent_session.as_ref());
-        let saved_agent_resume = saved_pane.and_then(saved_reported_resume);
+        let saved_agent_resume = saved_pane
+            .filter(|pane| !pane.suspended)
+            .and_then(saved_reported_resume);
         let saved_history =
             old_id.and_then(|old_id| history.and_then(|history| history.panes.get(old_id)));
         let startup = {
             let mut agent_restore = AgentRestoreState {
-                enabled: runtime_context.resume_agents_on_restore,
+                // Suspended tabs resume only upon explicit selection, even when
+                // automatic startup agent resume is disabled.
+                enabled: runtime_context.resume_agents_on_restore
+                    || saved_pane.is_some_and(|pane| pane.suspended),
                 resumed_sessions: resumed_agent_sessions,
             };
             pane_restore_startup(
