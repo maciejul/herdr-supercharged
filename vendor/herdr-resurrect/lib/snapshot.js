@@ -5,10 +5,10 @@ const herdr = require('./herdr');
 const allowlist = require('./allowlist');
 const pstree = require('./pstree');
 const agentSessions = require('./agent-sessions');
-const { SNAP_DIR, LAST, ensureDirs } = require('./paths');
+const { SNAP_DIR, LAST, SESSIONS_DIR, ensureDirs } = require('./paths');
+const retention = require('./retention');
 
 const SNAPSHOT_VERSION = 1;
-const KEEP = Number(process.env.HERDR_RESURRECT_KEEP || 20); // snapshots to retain
 
 // Pick the meaningful foreground program in a pane, ignoring the shell itself.
 // process_info = { shell_pid, foreground_process_group_id, foreground_processes: [...] }
@@ -163,19 +163,9 @@ function build() {
 }
 
 function fileStamp(iso) {
-  // 2026-07-06T18:04:11.123Z -> 20260706-180411
-  return iso.replace(/[-:]/g, '').replace('T', '-').replace(/\..*$/, '');
-}
-
-function prune() {
-  let files;
-  try {
-    files = fs.readdirSync(SNAP_DIR).filter((f) => /^snapshot-.*\.json$/.test(f)).sort();
-  } catch { return; }
-  const excess = files.length - KEEP;
-  for (let i = 0; i < excess; i++) {
-    try { fs.unlinkSync(path.join(SNAP_DIR, files[i])); } catch { /* ignore */ }
-  }
+  // Milliseconds and PID prevent simultaneous manual/event/hourly saves from
+  // overwriting each other's restore points within the same second.
+  return iso.replace(/[-:]/g, '').replace('T', '-').replace('.', '-').replace('Z', `-${process.pid}`);
 }
 
 function writeAtomic(file, text) {
@@ -191,8 +181,12 @@ function save() {
   const text = JSON.stringify(model, null, 2);
   const file = path.join(SNAP_DIR, `snapshot-${fileStamp(model.saved_at)}.json`);
   writeAtomic(file, text);
-  writeAtomic(LAST, text);
-  prune();
+  // Keep session data only in immutable archives. If concurrent cleanup removes
+  // this advisory pointer, loadModel discovers the newest archive directly.
+  writeAtomic(LAST, JSON.stringify({
+    tool: 'herdr-resurrect-reference', snapshot: path.basename(file), saved_at: model.saved_at,
+  }));
+  retention.prune(SESSIONS_DIR);
 
   let panes = 0, commands = 0, agents = 0;
   for (const w of model.workspaces)

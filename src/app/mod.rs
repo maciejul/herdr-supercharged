@@ -9,6 +9,7 @@ mod agent_resume;
 mod agent_suspend_tests;
 pub(crate) mod agent_view;
 mod agents;
+mod resurrect_schedule;
 mod unread_suspend;
 pub(crate) use agents::{AGENT_START_SETTLE_DELAY, MAX_AGENT_START_TIMEOUT};
 mod api;
@@ -163,6 +164,8 @@ pub struct App {
     pub(crate) read_idle_since: std::collections::HashMap<crate::layout::PaneId, Instant>,
     pub(crate) unread_suspend_check_at: Option<Instant>,
     pub(crate) unread_suspend_delay_seconds: u64,
+    pub(crate) next_resurrect_snapshot_at: Option<Instant>,
+    pub(crate) pending_resurrect_snapshot_log_id: Option<String>,
     /// Last attempt that could update a connected presentation surface.
     pub(crate) last_presentation_at: Option<Instant>,
     pub render_notify: Arc<Notify>,
@@ -686,6 +689,10 @@ impl App {
             last_render_at: None,
             read_idle_since: Default::default(),
             unread_suspend_check_at: None,
+            pending_resurrect_snapshot_log_id: None,
+            next_resurrect_snapshot_at: policy
+                .persist_session
+                .then(|| Instant::now() + resurrect_schedule::INTERVAL),
             unread_suspend_delay_seconds: if policy.persist_session {
                 unread_suspend::load_delay_seconds()
             } else {

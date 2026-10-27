@@ -3288,6 +3288,7 @@ impl HeadlessServer {
         if self.host_shutdown_requested() {
             return false;
         }
+        self.app.run_periodic_resurrect_snapshot(now);
         let mut changed = if self
             .app
             .unread_suspend_check_at

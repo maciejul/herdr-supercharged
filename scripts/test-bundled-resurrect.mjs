@@ -77,7 +77,24 @@ try {
       return true;
     }, action);
   };
+  const appDir = path.basename(path.dirname(configFile));
+  const pluginState = path.join(env.XDG_STATE_HOME, appDir, 'plugins', 'ntindle.herdr-resurrect');
+  const store = path.join(pluginState, 'sessions', name);
+  const archiveDir = path.join(store, 'snapshots');
+  const stoppedDir = path.join(pluginState, 'sessions', 'stopped', 'snapshots');
+  fs.mkdirSync(archiveDir, { recursive: true });
+  fs.mkdirSync(stoppedDir, { recursive: true });
+  const oldArchive = path.join(stoppedDir, 'snapshot-20000101-000000.json');
+  fs.writeFileSync(oldArchive, '{}');
+  fs.writeFileSync(path.join(path.dirname(stoppedDir), 'last.json'), JSON.stringify({ tool: 'herdr-resurrect', saved_at: '2000-01-01T00:00:00Z' }));
+  for (let i = 1; i <= 30; i++) {
+    const stamp = new Date(Date.now() - i * 60000).toISOString().replace(/[-:]/g, '').replace('T', '-').replace(/\..*$/, '');
+    fs.writeFileSync(path.join(archiveDir, `snapshot-${stamp}.json`), '{}');
+  }
   await invoke('save');
+  assert.equal(fs.existsSync(oldArchive), false, 'expired stopped-session snapshot is pruned');
+  assert.equal(fs.existsSync(path.join(path.dirname(stoppedDir), 'last.json')), false);
+  assert.ok(fs.readdirSync(archiveDir).length > 30, 'recent history is not truncated to 20 files');
   await invoke('restore-preview');
   await invoke('restore');
   const controlPid = cli('pane', 'process-info', '--pane', 'w2:p1').process_info.shell_pid;
@@ -91,8 +108,9 @@ try {
   assert.equal(after.tabs.find(t => t.tab_id === 'w1:t1').label, 'Exact conversation (Suspended)');
   assert.equal(after.panes.find(p => p.pane_id === 'w1:p1').agent_session.value, exact);
   assertNoRuntime('w1:p1');
-  const appDir = path.basename(path.dirname(configFile));
-  const snap = JSON.parse(fs.readFileSync(path.join(env.XDG_STATE_HOME, appDir, 'plugins', 'ntindle.herdr-resurrect', 'sessions', name, 'last.json')));
+  const latest = JSON.parse(fs.readFileSync(path.join(store, 'last.json')));
+  const snap = latest.tool === 'herdr-resurrect-reference'
+    ? JSON.parse(fs.readFileSync(path.join(store, 'snapshots', latest.snapshot))) : latest;
   const agent = snap.workspaces.flatMap(w => w.tabs.flatMap(t => t.panes)).find(p => p.pane_id === 'w1:p1');
   assert.equal(agent.suspended, true);
   assert.equal(agent.agent.session.value, exact);

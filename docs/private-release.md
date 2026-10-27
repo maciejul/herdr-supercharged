@@ -41,6 +41,11 @@ There are no npm dependencies. Existing explicit plugin installations are kept,
 and a disabled bundled plugin stays disabled across upgrades. User settings and
 snapshots stay in the normal plugin directories. Auto-restore defaults to off.
 
+The server takes a full-session Resurrect snapshot every hour, without a separate
+autosave tab. Snapshot archives older than 30 days are removed on saves, including
+archives of stopped named sessions; named saved spaces are retained. Suspension
+still uses native exact-session persistence and does not wait on plugin snapshots.
+
 Suspended tabs retain exact Claude/Codex session IDs through shutdown hooks and
 native save/restore. A native pending resume plan can recover reporting metadata
 lost by older code; directory-wide "continue" commands never override a suspended

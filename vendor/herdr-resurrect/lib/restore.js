@@ -1,21 +1,42 @@
 'use strict';
 const fs = require('fs');
+const path = require('path');
 const herdr = require('./herdr');
 const allowlist = require('./allowlist');
 const agents = require('./agents');
 const pstree = require('./pstree');
-const { LAST } = require('./paths');
+const { LAST, SNAP_DIR } = require('./paths');
+const { snapshotTime } = require('./retention');
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 function loadModel(file) {
-  const f = file || LAST;
-  if (!fs.existsSync(f)) throw new Error(`no snapshot found at ${f} — run "save" first`);
-  const model = JSON.parse(fs.readFileSync(f, 'utf8'));
-  if (!model || model.tool !== 'herdr-resurrect' || !Array.isArray(model.workspaces))
-    throw new Error(`${f} is not a herdr-resurrect snapshot`);
-  return model;
+  const read = f => {
+    let model = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (model?.tool === 'herdr-resurrect-reference') {
+      if (typeof model.snapshot !== 'string' || path.basename(model.snapshot) !== model.snapshot ||
+          !/^snapshot-\d{8}-\d{6}(?:-\d{3}-\d+)?\.json$/.test(model.snapshot))
+        throw new Error(`${f} has an invalid snapshot reference`);
+      model = JSON.parse(fs.readFileSync(path.join(path.dirname(f), 'snapshots', model.snapshot), 'utf8'));
+    }
+    if (!model || model.tool !== 'herdr-resurrect' || !Array.isArray(model.workspaces))
+      throw new Error(`${f} is not a herdr-resurrect snapshot`);
+    return model;
+  };
+  if (file) return read(file); // named saved spaces and explicit old files still work
+  // Prefer the newest immutable archive even if an older concurrent writer
+  // published last.json later. Missing/removed pointers never lose new saves.
+  let archives = [];
+  try {
+    archives = fs.readdirSync(SNAP_DIR).filter(f => snapshotTime(f) !== null)
+      .sort((a, b) => snapshotTime(b) - snapshotTime(a) || b.localeCompare(a));
+  }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  for (const name of archives) {
+    try { return read(path.join(SNAP_DIR, name)); } catch { /* try another valid restore point */ }
+  }
+  try { return read(LAST); } catch { throw new Error(`no valid snapshot found at ${LAST} — run "save" first`); }
 }
 
 // The shell command we'd relaunch to bring a pane back. Prefer the OS-native cmdline

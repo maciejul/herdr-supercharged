@@ -227,6 +227,16 @@ impl App {
         action_id: String,
         selected_text: Option<String>,
     ) -> Result<(), String> {
+        self.invoke_plugin_action_from_source(action_id, selected_text, "keybinding")
+            .map(|_| ())
+    }
+
+    pub(crate) fn invoke_plugin_action_from_source(
+        &mut self,
+        action_id: String,
+        selected_text: Option<String>,
+        source: &str,
+    ) -> Result<crate::api::schema::PluginCommandLogInfo, String> {
         self.refresh_installed_plugins()
             .map_err(|err| format!("failed to load plugin registry: {err}"))?;
         let (plugin, action) = self
@@ -240,8 +250,8 @@ impl App {
             &action.qualified_id(),
         )
         .map_err(|(_, message)| message)?;
-        let mut context = self.current_plugin_context("keybinding");
-        context.invocation_source = Some("keybinding".to_string());
+        let mut context = self.current_plugin_context(source);
+        context.invocation_source = Some(source.to_string());
         context.selected_text = selected_text;
         self.start_plugin_command(
             &plugin,
@@ -251,7 +261,6 @@ impl App {
             &context,
             None,
         )
-        .map(|_| ())
         .map_err(|(_, message)| message)
     }
 

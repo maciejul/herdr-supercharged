@@ -80,6 +80,6 @@ function ensureSpacesDir() {
 }
 
 module.exports = {
-  PLUGIN_ROOT, STATE_DIR, CONFIG_DIR, SESSION, SESSION_DIR, SNAP_DIR, LAST, SPACES_DIR,
+  PLUGIN_ROOT, STATE_DIR, CONFIG_DIR, SESSION, SESSIONS_DIR, SESSION_DIR, SNAP_DIR, LAST, SPACES_DIR,
   ensureDirs, ensureSpacesDir,
 };

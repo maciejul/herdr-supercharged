@@ -172,6 +172,10 @@ impl App {
         {
             self.state.plugin_commands_in_flight =
                 self.state.plugin_commands_in_flight.saturating_sub(1);
+            // Completion also clears the hourly token if its log was evicted.
+            if self.pending_resurrect_snapshot_log_id.as_deref() == Some(log_id.as_str()) {
+                self.pending_resurrect_snapshot_log_id = None;
+            }
             if let Some(log) = self
                 .state
                 .plugin_command_logs

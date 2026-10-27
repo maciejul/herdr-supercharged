@@ -1,5 +1,6 @@
 // Bundled upstream MIT-licensed assets; see vendor/herdr-resurrect/LICENSE.
 const ASSETS: &[(&str, &[u8])] = &[
+    ("lib/retention.js", include_bytes!("../vendor/herdr-resurrect/lib/retention.js")),
     (".gitattributes", include_bytes!("../vendor/herdr-resurrect/.gitattributes")),
     (".gitignore", include_bytes!("../vendor/herdr-resurrect/.gitignore")),
     ("LICENSE", include_bytes!("../vendor/herdr-resurrect/LICENSE")),

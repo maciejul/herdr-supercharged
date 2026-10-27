@@ -3,7 +3,8 @@
 // List saved snapshots, newest last, with a one-line summary each.
 const fs = require('fs');
 const path = require('path');
-const { SNAP_DIR, LAST } = require('../lib/paths');
+const { SNAP_DIR } = require('../lib/paths');
+const { snapshotTime } = require('../lib/retention');
 
 function summarize(model) {
   let w = model.workspaces.length, t = 0, p = 0, c = 0, a = 0;
@@ -21,13 +22,14 @@ function summarize(model) {
 
 try {
   const files = fs.existsSync(SNAP_DIR)
-    ? fs.readdirSync(SNAP_DIR).filter((f) => /^snapshot-.*\.json$/.test(f)).sort()
+    ? fs.readdirSync(SNAP_DIR).filter(f => snapshotTime(f) !== null)
+      .sort((a, b) => snapshotTime(a) - snapshotTime(b) || a.localeCompare(b))
     : [];
   if (!files.length) {
     console.log('herdr-resurrect: no snapshots yet. Run the "save" action to make one.');
     process.exit(0);
   }
-  // last.json is a copy, so mark the newest file (names are timestamp-sorted).
+  // Mark the newest immutable archive; last.json is only an advisory reference.
   const newest = files[files.length - 1];
   console.log(`herdr-resurrect snapshots (${files.length}) in ${SNAP_DIR}:\n`);
   for (const f of files) {

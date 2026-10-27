@@ -142,6 +142,10 @@ Then `herdr server reload-config`. (Prefix defaults to `ctrl+b`, tmux-style.)
 
 ### Autosave — pick one (or both)
 
+**Private bundled build:** Herdr itself saves every hour without an extra pane.
+The optional timer pane below is only needed for additional, more frequent saves.
+This build keeps 30 days of snapshot history, rather than the upstream count limit.
+
 - **Event-driven (on by default):** the plugin snapshots whenever the session
   shape changes (workspace/pane created or closed, agent detected), debounced to at
   most one write per 20s. Nothing to enable.
@@ -241,7 +245,7 @@ everything. Agents are handled automatically and are **not** listed here.
 | --- | --- | --- |
 | `HERDR_RESURRECT_INTERVAL` | `900` | autosave-pane interval, seconds |
 | `HERDR_RESURRECT_DEBOUNCE` | `20000` | min ms between event-driven saves |
-| `HERDR_RESURRECT_KEEP` | `20` | snapshots to retain before pruning |
+| `HERDR_RESURRECT_KEEP` | ignored in private build | Replaced by fixed 30-day retention |
 
 Snapshots live under `$HERDR_PLUGIN_STATE_DIR/sessions/<session>/snapshots/`, with the
 newest also at `.../last.json`.

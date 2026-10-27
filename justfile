@@ -125,6 +125,9 @@ docs-contract-test:
 # Test bundled agent integration assets
 integration-assets-test:
     node vendor/herdr-resurrect/test/suspension.test.js
+    node vendor/herdr-resurrect/test/retention.test.js
+    node vendor/herdr-resurrect/test/latest.test.js
+    node vendor/herdr-resurrect/test/storage.test.js
     bun test src/integration/assets/herdr-agent-state.test.ts
     bun test src/integration/assets/opencode/herdr-agent-state.test.ts
     bun test src/integration/assets/opencode/herdr-tui-session.test.ts

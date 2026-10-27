@@ -16,6 +16,29 @@ installation requires linking the extracted bundled directory explicitly.
 Snapshots and user settings remain in the existing plugin state/config directories.
 Auto-restore remains off by default.
 
+## Automatic snapshots and retention
+
+The private Herdr server invokes a full-session snapshot once per hour while it
+is running. No autosave pane is needed. Each named session schedules its own
+snapshots. Event-driven and manual saves remain available; suspension continues
+to use native session persistence and does not wait for an extra plugin save.
+Disabled plugins are respected. Scheduled saves do not overlap; after system
+sleep there is one due save, not a burst of missed hourly runs. Errors appear in
+plugin logs (or the server log if the action cannot be started).
+
+Every successful save removes recognized snapshot archives older than 30 days
+across all named sessions, including stopped ones. Expired latest references and
+legacy latest copies are also cleaned. The former 20-snapshot count limit and
+HERDR_RESURRECT_KEEP override no longer apply. Named saved spaces are not pruned.
+Retention runs while Herdr is running and saving; it cannot clean files while
+the machine is off.
+
+New last.json files contain a small reference rather than a duplicate session
+snapshot. Restore supports both old full-model files and new references, and can
+discover the newest archive if the pointer is missing or stale. Older versions
+of the plugin do not understand reference files; for rollback, load an explicit
+timestamped archive with the older restore script's --file option.
+
 ## Suspension behavior
 
 - Snapshots preserve exact native agent IDs and mark suspended panes.
