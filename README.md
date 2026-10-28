@@ -1,21 +1,22 @@
 # herdr
 
-> **Supercharged fork.** This repository contains a fork of
-> [Herdr](https://github.com/herdrdev/herdr) customized for personal
-> coding-agent workflows. The original project is maintained by the Herdr team.
->
-> **Experimental.** This fork is an experiment and is not officially supported
-> or endorsed by the Herdr team.
->
-> Additions include personal Space groups, automatic Claude/Codex
-> naming, configurable activity and completion indicators, background-task
-> tracking, and idle-session suspension controls.
->
-> Use the [releases](https://github.com/Maciejul/herdr-supercharged/releases)
-> and [installation guide](docs/private-release.md), including the
-> separate `herdr-supercharged` setup. Fork versions use a `-supercharged.N` suffix.
-> The upstream installer, package-manager commands, badges, and `herdr update`
-> below refer to upstream Herdr; they do not distribute these customizations.
+**Supercharged fork.** This repository contains a fork of [Herdr](https://github.com/herdrdev/herdr) customized for personal coding-agent workflows. The original project is maintained by the Herdr team.
+
+**Experimental.** This fork is an experiment and is not officially supported or endorsed by the Herdr team.
+
+Use the [releases](https://github.com/Maciejul/herdr-supercharged/releases) and [installation guide](docs/private-release.md), including the separate `herdr-supercharged` setup. Fork versions use a `-supercharged.N` suffix. The upstream installer, package-manager commands, badges, and `herdr update` below refer to upstream Herdr; they do not distribute these customizations.
+
+### Features added in this fork
+
+- Personal Space groups: organize workspaces into groups, with a "Move to group" action; unread spaces stay visible in collapsed groups.
+- Workspace tab list.
+- Automatic Claude/Codex conversation naming, with task names preserved through agent activity titles.
+- Configurable agent activity and completion indicators.
+- Background-task tracking, including Codex background activity routing and completion (with an opt-in zsh helper for per-pane Codex launches).
+- Idle-session suspension that only applies to read, idle tabs; unread completions, viewed tabs, working or blocked agents and background work are left alone. Suspended tabs keep their names and show a display-only "(Suspended)" suffix.
+- Resource usage reporting: a `server.resource_usage` API (Linux PSS-based) and a client resource usage view.
+- Bundled herdr-resurrect plugin with hourly automatic snapshots and 30-day retention, verified to work across live handoff.
+- Private version scheme (`-supercharged.N`) that stays compatible with upstream version checks.
 
 <p align="center">
   <img src="assets/logo.png" alt="herdr" width="100" />
