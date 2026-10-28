@@ -1,21 +1,21 @@
 # herdr
 
-> **supercharged customized fork.** This private repository contains our fork of
-> [Herdr](https://github.com/herdrdev/herdr), customized at supercharged for our
+> **Supercharged fork.** This repository contains a fork of
+> [Herdr](https://github.com/herdrdev/herdr) customized for personal
 > coding-agent workflows. The original project is maintained by the Herdr team.
 >
-> **Experimental — not an official supercharged tool.** This fork is currently an
-> experiment and is not an officially supported or endorsed supercharged product.
+> **Experimental.** This fork is an experiment and is not officially supported
+> or endorsed by the Herdr team.
 >
-> supercharged additions include personal Space groups, automatic Claude/Codex
+> Additions include personal Space groups, automatic Claude/Codex
 > naming, configurable activity and completion indicators, background-task
 > tracking, and idle-session suspension controls.
 >
-> Use the [private releases](https://github.com/Maciejul/herdr-supercharged/releases)
-> and [supercharged installation guide](docs/private-release.md), including the
-> separate `herdr-supercharged` setup. Private versions use a `-supercharged.N` suffix.
+> Use the [releases](https://github.com/Maciejul/herdr-supercharged/releases)
+> and [installation guide](docs/private-release.md), including the
+> separate `herdr-supercharged` setup. Fork versions use a `-supercharged.N` suffix.
 > The upstream installer, package-manager commands, badges, and `herdr update`
-> below refer to upstream Herdr; they do not distribute supercharged customizations.
+> below refer to upstream Herdr; they do not distribute these customizations.
 
 <p align="center">
   <img src="assets/logo.png" alt="herdr" width="100" />
@@ -57,7 +57,7 @@ https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
 
 ## install
 
-For the supercharged build, follow the [private installation guide](docs/private-release.md).
+For the supercharged build, follow the [installation guide](docs/private-release.md).
 The commands below install upstream Herdr.
 
 ```bash

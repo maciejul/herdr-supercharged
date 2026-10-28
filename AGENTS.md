@@ -2,7 +2,7 @@
 
 Terminal based agent runtime for coding agents.
 
-## Private supercharged customization
+## Supercharged customization
 
 This checkout belongs to `Maciejul/herdr-supercharged`, a **private standalone
 repository**, detached from GitHub's fork network. `origin` is our private repo;
