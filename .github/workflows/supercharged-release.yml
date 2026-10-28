@@ -15,17 +15,16 @@ concurrency:
   group: supercharged-release-${{ inputs.tag }}
   cancel-in-progress: false
 
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  CARGO_BUILD_JOBS: '2'
+  CARGO_INCREMENTAL: '0'
+
 jobs:
-  release:
+  validate:
     if: github.repository == 'maciejul/herdr-supercharged'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    permissions:
-      contents: write
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      CARGO_BUILD_JOBS: '2'
-      CARGO_INCREMENTAL: '0'
+    timeout-minutes: 10
     steps:
       - name: Validate destination and existing tag
         env:
@@ -41,6 +40,21 @@ jobs:
             echo 'Release already exists; refusing to overwrite it.'; exit 1
           fi
 
+  build:
+    needs: validate
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - name: windows-x86_64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: refs/tags/${{ inputs.tag }}
@@ -50,51 +64,118 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PYCODE'
-          import os, pathlib, tomllib
-          version = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['package']['version']
-          if os.environ['RELEASE_TAG'] != 'v' + version:
-              raise SystemExit('Release tag does not match Cargo.toml version')
-          PYCODE
+          version=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          [[ "$RELEASE_TAG" == "v$version" ]] || { echo 'Release tag does not match Cargo.toml version'; exit 1; }
           rustup show
+          rustup target add ${{ matrix.target }}
 
       - name: Install Zig
         uses: vercel-labs/setup-zig@83c1594f26b86da8a9a8ddd9b5ee5f3af0f96943 # v1.0.2
         with:
           version: 0.16.0
 
-      - name: Install build tools
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build build-essential pkg-config
 
-      - name: Build optimized Linux x86_64 binary
-        run: cargo build --release --locked --bin herdr --target x86_64-unknown-linux-gnu
+      - name: Remove Zig caches
+        shell: bash
+        run: rm -rf .zig-cache vendor/libghostty-vt/.zig-cache vendor/libghostty-vt/zig-out
 
-      - name: Smoke test and prepare assets
+      - name: Build optimized binary
+        if: runner.os == 'Linux'
+        run: cargo build --release --locked --bin herdr --target ${{ matrix.target }}
+
+      - name: Build optimized binary (Windows)
+        if: runner.os == 'Windows'
+        env:
+          LIBGHOSTTY_VT_OPTIMIZE: ReleaseFast
+          LIBGHOSTTY_VT_SIMD: 'true'
+        run: cargo build --release --locked --bin herdr --target ${{ matrix.target }}
+
+      - name: Smoke test and package (Linux)
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-          binary=target/x86_64-unknown-linux-gnu/release/herdr
+          binary=target/${{ matrix.target }}/release/herdr
           "$binary" --version | grep -Fx "herdr ${RELEASE_TAG#v}"
           mkdir -p release-assets
           install -m755 "$binary" release-assets/herdr-linux-x86_64
+
+      - name: Smoke test and package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          $package = Join-Path $env:RUNNER_TEMP "Microsoft.Windows.Console.ConPTY.nupkg"
+          $stage = Join-Path $env:RUNNER_TEMP "herdr-windows-x86_64"
+          .\scripts\package_windows_conpty.ps1 `
+            -HerdrExe target\${{ matrix.target }}\release\herdr.exe `
+            -PackagePath $package `
+            -StageDir $stage `
+            -OutputPath release-assets\herdr-windows-x86_64.zip
+          $version = (& (Join-Path $stage "herdr.exe") --version | Out-String).Trim()
+          $tagVersion = $env:RELEASE_TAG -replace '^v', ''
+          if ($version -ne "herdr $tagVersion") {
+            throw "Packaged Windows binary has unexpected version identity: $version"
+          }
+
+      - name: Record toolchain versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '{"target": "%s", "runner": "%s", "rustc": "%s", "zig": "%s"}\n' \
+            '${{ matrix.target }}' '${{ matrix.os }}' "$(rustc --version)" "$(zig version)" \
+            > 'release-assets/build-${{ matrix.name }}.json'
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-${{ matrix.name }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: release-*
+          path: build-artifacts
+          merge-multiple: true
+
+      - name: Prepare assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cp build-artifacts/herdr-linux-x86_64 build-artifacts/herdr-windows-x86_64.zip release-assets/
           python3 - <<'PYCODE'
-          import datetime, json, os, pathlib, subprocess
+          import datetime, glob, json, os, pathlib, subprocess
+          builds = [json.load(open(p)) for p in sorted(glob.glob('build-artifacts/build-*.json'))]
           metadata = {
               'repository': os.environ['GITHUB_REPOSITORY'],
               'tag': os.environ['RELEASE_TAG'],
               'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
-              'target': 'x86_64-unknown-linux-gnu',
-              'runner': 'ubuntu-24.04',
               'built_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-              'rustc': subprocess.check_output(['rustc', '--version'], text=True).strip(),
-              'zig': subprocess.check_output(['zig', 'version'], text=True).strip(),
+              'builds': builds,
           }
           pathlib.Path('release-assets/build-metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
           PYCODE
           cd release-assets
-          sha256sum herdr-linux-x86_64 build-metadata.json > SHA256SUMS
+          sha256sum herdr-linux-x86_64 herdr-windows-x86_64.zip build-metadata.json > SHA256SUMS
           sha256sum --check SHA256SUMS
 
       - name: Publish release after asset verification
@@ -103,16 +184,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat > "$RUNNER_TEMP/supercharged-release-notes.md" <<'NOTES'
-          Supercharged build of Herdr. Linux x86_64, GNU/glibc, built on Ubuntu 24.04.
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          Supercharged build of Herdr.
+          - `herdr-linux-x86_64`: Linux x86_64, GNU/glibc, built on Ubuntu 24.04.
+          - `herdr-windows-x86_64.zip`: Windows x86_64 (MSVC) with the bundled ConPTY runtime.
           Verify the downloaded files with `sha256sum --check SHA256SUMS`.
           See build-metadata.json for the source commit and compiler versions.
           This release does not update upstream distribution manifests or auto-update channels.
           NOTES
           gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
-            --title "Herdr ${RELEASE_TAG#v} (Supercharged)" --notes-file "$RUNNER_TEMP/supercharged-release-notes.md"
-          gh release upload "$RELEASE_TAG" release-assets/herdr-linux-x86_64 release-assets/SHA256SUMS release-assets/build-metadata.json --repo "$GITHUB_REPOSITORY"
-          mkdir "$RUNNER_TEMP/supercharged-release-verify"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/supercharged-release-verify"
-          (cd "$RUNNER_TEMP/supercharged-release-verify" && sha256sum --check SHA256SUMS)
+            --title "Herdr ${RELEASE_TAG#v} (Supercharged)" --notes-file "$RUNNER_TEMP/release-notes.md"
+          gh release upload "$RELEASE_TAG" release-assets/herdr-linux-x86_64 release-assets/herdr-windows-x86_64.zip release-assets/SHA256SUMS release-assets/build-metadata.json --repo "$GITHUB_REPOSITORY"
+          mkdir "$RUNNER_TEMP/release-verify"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/release-verify"
+          (cd "$RUNNER_TEMP/release-verify" && sha256sum --check SHA256SUMS)
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false
