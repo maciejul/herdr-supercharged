@@ -1,10 +1,10 @@
-name: Private supercharged release
+name: Supercharged release
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing private release tag, e.g. v0.9.5-supercharged.1
+        description: Existing release tag, e.g. v0.9.5-supercharged.1
         required: true
         type: string
 
@@ -12,12 +12,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: private-release-${{ inputs.tag }}
+  group: supercharged-release-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   release:
-    if: github.repository == 'Maciejul/herdr-supercharged' && github.event.repository.private == true
+    if: github.repository == 'maciejul/herdr-supercharged'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -27,7 +27,7 @@ jobs:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
     steps:
-      - name: Validate private destination and existing tag
+      - name: Validate destination and existing tag
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -36,7 +36,6 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-supercharged\.[0-9]+$ ]] || {
             echo 'Expected vMAJOR.MINOR.PATCH-supercharged.NUMBER'; exit 1;
           }
-          gh api "repos/$GITHUB_REPOSITORY" --jq '.private' | grep -qx true
           gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.ref' | grep -Fx "refs/tags/$RELEASE_TAG"
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo 'Release already exists; refusing to overwrite it.'; exit 1
@@ -98,23 +97,22 @@ jobs:
           sha256sum herdr-linux-x86_64 build-metadata.json > SHA256SUMS
           sha256sum --check SHA256SUMS
 
-      - name: Publish private release after asset verification
+      - name: Publish release after asset verification
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY" --jq '.private' | grep -qx true
-          cat > "$RUNNER_TEMP/private-release-notes.md" <<'NOTES'
-          Private supercharged build of Herdr. Linux x86_64, GNU/glibc, built on Ubuntu 24.04.
+          cat > "$RUNNER_TEMP/supercharged-release-notes.md" <<'NOTES'
+          Supercharged build of Herdr. Linux x86_64, GNU/glibc, built on Ubuntu 24.04.
           Verify the downloaded files with `sha256sum --check SHA256SUMS`.
           See build-metadata.json for the source commit and compiler versions.
           This release does not update upstream distribution manifests or auto-update channels.
           NOTES
           gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
-            --title "Herdr ${RELEASE_TAG#v} (supercharged)" --notes-file "$RUNNER_TEMP/private-release-notes.md"
+            --title "Herdr ${RELEASE_TAG#v} (Supercharged)" --notes-file "$RUNNER_TEMP/supercharged-release-notes.md"
           gh release upload "$RELEASE_TAG" release-assets/herdr-linux-x86_64 release-assets/SHA256SUMS release-assets/build-metadata.json --repo "$GITHUB_REPOSITORY"
-          mkdir "$RUNNER_TEMP/private-release-verify"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/private-release-verify"
-          (cd "$RUNNER_TEMP/private-release-verify" && sha256sum --check SHA256SUMS)
+          mkdir "$RUNNER_TEMP/supercharged-release-verify"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/supercharged-release-verify"
+          (cd "$RUNNER_TEMP/supercharged-release-verify" && sha256sum --check SHA256SUMS)
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest=false

@@ -1,10 +1,10 @@
-# Bundled private Herdr integration
+# Bundled supercharged Herdr integration
 
 Upstream: https://github.com/ntindle/herdr-resurrect
 Base commit: 109a9376549e29646c77fdfb7ed8ba456a9d6617 (v0.2.0).
 License: MIT; original LICENSE and attribution are retained.
 
-This variant is embedded in the private Herdr binary. At server startup it is
+This variant is embedded in the supercharged Herdr binary. At server startup it is
 extracted to a content-addressed directory under the Herdr managed plugins
 folder and registered automatically. No GitHub access or separate plugin checkout
 is needed. Node.js 16+ must be available on PATH; there are no npm dependencies.
@@ -18,7 +18,7 @@ Auto-restore remains off by default.
 
 ## Automatic snapshots and retention
 
-The private Herdr server invokes a full-session snapshot once per hour while it
+The supercharged Herdr server invokes a full-session snapshot once per hour while it
 is running. No autosave pane is needed. Each named session schedules its own
 snapshots. Event-driven and manual saves remain available; suspension continues
 to use native session persistence and does not wait for an extra plugin save.
@@ -49,13 +49,13 @@ timestamped archive with the older restore script's --file option.
 - A missing workspace containing suspended panes is skipped with a message;
   use native Herdr session recovery to preserve deferred exact-session resume.
 
-The private Herdr core pins exact session identity before suspension, protects it
+The supercharged Herdr core pins exact session identity before suspension, protects it
 from late shutdown hooks, and recovers identity from a validated native pending
 resume plan. Native snapshots and the API share that identity source. Suspended
 tabs always prefer the exact ID over an old generic continue command, including
 when automatic startup resume is off.
 
-The plugin currently uses the private tab-label suffix plus missing shell PID to
+The plugin currently uses the supercharged tab-label suffix plus missing shell PID to
 identify suspension because the frozen public API has no suspension field.
 
 ## Validation

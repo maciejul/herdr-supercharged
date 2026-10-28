@@ -4,10 +4,10 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install-private-release.sh [vMAJOR.MINOR.PATCH-supercharged.NUMBER]
+Usage: scripts/install-supercharged-release.sh [vMAJOR.MINOR.PATCH-supercharged.NUMBER]
 
 Defaults to v0.9.5-supercharged.5. Requires authenticated GitHub CLI access to
-Maciejul/herdr-supercharged and Linux x86_64 with glibc 2.39 or newer.
+maciejul/herdr-supercharged and Linux x86_64 with glibc 2.39 or newer.
 Installs to ~/.local/bin/herdr, keeping a timestamped backup beside it.
 Does not stop servers, change configuration, or install agent integrations.
 EOF
@@ -23,7 +23,7 @@ if (( $# > 1 )) || [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-supercharged\.[0-9]+$
   exit 1
 fi
 if [[ $(uname -s) != Linux || $(uname -m) != x86_64 ]]; then
-  echo 'This private release installer supports Linux x86_64 only (including WSL).' >&2
+  echo 'This release installer supports Linux x86_64 only (including WSL).' >&2
   exit 1
 fi
 for tool in gh sha256sum getconf sort mktemp install; do
@@ -48,8 +48,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Downloading $tag from Maciejul/herdr-supercharged..."
-gh release download "$tag" --repo Maciejul/herdr-supercharged \
+echo "Downloading $tag from maciejul/herdr-supercharged..."
+gh release download "$tag" --repo maciejul/herdr-supercharged \
   --dir "$download_dir" \
   --pattern herdr-linux-x86_64 --pattern SHA256SUMS --pattern build-metadata.json
 (
@@ -87,5 +87,5 @@ Running servers still use their existing executable. When active work is finishe
 run `herdr server stop`, then `herdr` from an external terminal. Stopping a server
 ends its live pane processes. Restart named sessions separately when ready.
 Refresh Claude/Codex integrations and restart agent sessions to load new hooks.
-Use this script for private upgrades: `herdr update` still targets upstream.
+Use this script for supercharged upgrades: `herdr update` still targets upstream.
 EOF

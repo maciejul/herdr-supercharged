@@ -72,7 +72,7 @@ pub struct Version {
 impl Version {
     pub fn parse(s: &str) -> Option<Self> {
         let s = s.strip_prefix('v').unwrap_or(s);
-        // Private build revisions retain the upstream version for compatibility
+        // Supercharged build revisions retain the upstream version for compatibility
         // checks. Their full identity is still supplied by build_info::version().
         let s = if let Some((base, revision)) = s.split_once("-supercharged.") {
             if revision.is_empty() || !revision.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -3025,7 +3025,7 @@ mod tests {
     }
 
     #[test]
-    fn private_supercharged_versions_preserve_upstream_compatibility() {
+    fn supercharged_versions_preserve_upstream_compatibility() {
         for version in ["0.9.5-supercharged.1", "v0.9.5-supercharged.2"] {
             assert_eq!(Version::parse(version), Version::parse("0.9.5"));
             assert!(Version::parse(version) < Version::parse("0.9.6"));

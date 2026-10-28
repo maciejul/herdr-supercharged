@@ -4,15 +4,15 @@ Terminal based agent runtime for coding agents.
 
 ## Supercharged customization
 
-This checkout belongs to `Maciejul/herdr-supercharged`, a **private standalone
-repository**, detached from GitHub's fork network. `origin` is our private repo;
+This checkout belongs to `maciejul/herdr-supercharged`, a public fork of
+`herdrdev/herdr`. `origin` is our fork;
 `upstream` is the public `herdrdev/herdr`. The integration branch is `master`.
 Our customization work is authorized here; upstream maintainer/contribution
-rules below govern interactions with the public project, not our private work.
+rules below govern interactions with the public project, not our fork's work.
 Preserve the universal architecture and code conventions below.
 
 For manual upstream updates, run `./scripts/sync-upstream.sh` from a clean
-`master`. It checks remote destinations, fetches private changes, fast-forwards
+`master`. It checks remote destinations, fetches origin changes, fast-forwards
 when necessary, and merges `upstream/master`, preserving our custom commits.
 It stops on divergence from origin or merge conflicts; resolve deliberately,
 or use `git merge --abort` for an in-progress merge. Review and test the result,
@@ -21,14 +21,14 @@ requested; it does not run tests. The script never pushes upstream or force-push
 
 On a fresh clone, add `upstream` with
 `git remote add upstream https://github.com/herdrdev/herdr.git` and set
-`git config remote.pushDefault origin`. Keep private changes on `origin`.
-GitHub Actions run privately in this repository. Upstream publishing, website,
-and issue automation are restricted to the upstream repository. Private releases
-use `.github/workflows/private-release.yml`; see `docs/private-release.md`. During upstream merges,
+`git config remote.pushDefault origin`. Keep our changes on `origin`.
+GitHub Actions run in this repository. Upstream publishing, website,
+and issue automation are restricted to the upstream repository. Releases
+use `.github/workflows/supercharged-release.yml`; see `docs/supercharged-release.md`. During upstream merges,
 preserve this section and `scripts/sync-upstream.sh`. `CLAUDE.md` is a symlink
 to this file, so edit this single source of truth.
 
-Private UI customization: unseen `Done` dots and tab labels pulse the configured
+Supercharged UI customization: unseen `Done` dots and tab labels pulse the configured
 completion color. `src/client/shell/completion_glow.rs` owns the client animation;
 preserve upstream completion/seen semantics. Sidebar symbol mode stays static;
 tab-label glow is independent. Restrict animation to visible chrome and never
@@ -42,7 +42,7 @@ Tracking preferences in Settings distinguish client display choices from the
 machine-wide integration toggle, which must confirm adding/removing hooks.
 Preserve session-resume and unrelated hooks. Activity travels through bounded
 metadata tokens; ordinary-shell facts come from existing runtime process probes,
-never renderer process queries. See the private customization notes in
+never renderer process queries. See the supercharged customization notes in
 `docs/next/website/src/content/docs/configuration.mdx` for the supported options.
 
 Launch the development build with `herdr-test` (a local symlink to

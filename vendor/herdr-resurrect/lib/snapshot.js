@@ -69,7 +69,7 @@ function buildPane(snap, paneId, index, layout, ctx) {
     cwd: p.cwd || (fg && fg.cwd) || null,
     rect: rect || null,
   };
-  // The private Herdr build retains agent identity but releases the PTY while
+  // The supercharged Herdr build retains agent identity but releases the PTY while
   // suspended. The public API currently exposes this through the tab label.
   const tab = (snap.tabs || []).find(t => t.tab_id === p.tab_id);
   if (tab && / \(Suspended\)$/.test(tab.label || '') && !pinfo?.shell_pid)

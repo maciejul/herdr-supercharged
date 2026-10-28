@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Merge public upstream into our private master; publishing is opt-in.
+# Merge public upstream into our master; publishing is opt-in.
 set -euo pipefail
 
 push=false
@@ -9,7 +9,7 @@ case "${1:-}" in
   --help|-h)
     echo 'Usage: scripts/sync-upstream.sh [--push]'
     echo 'Requires clean master. Fetches origin/upstream and merges upstream/master.'
-    echo 'With --push, publishes master to the private origin after a successful merge.'
+    echo 'With --push, publishes master to origin after a successful merge.'
     exit 0 ;;
   *) echo 'Unknown option. Use --help.' >&2; exit 2 ;;
 esac
@@ -37,11 +37,11 @@ check_remote() {
     esac
   done
 }
-check_remote origin Maciejul/herdr-supercharged
+check_remote origin maciejul/herdr-supercharged
 check_remote upstream herdrdev/herdr
 
 git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
-# Incorporate private updates without silently reconciling divergent local work.
+# Incorporate updates from origin without silently reconciling divergent local work.
 if ! git merge-base --is-ancestor origin/master HEAD; then
   git merge --ff-only origin/master
 fi

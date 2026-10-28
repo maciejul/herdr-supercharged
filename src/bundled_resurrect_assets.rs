@@ -4,7 +4,7 @@ const ASSETS: &[(&str, &[u8])] = &[
     (".gitattributes", include_bytes!("../vendor/herdr-resurrect/.gitattributes")),
     (".gitignore", include_bytes!("../vendor/herdr-resurrect/.gitignore")),
     ("LICENSE", include_bytes!("../vendor/herdr-resurrect/LICENSE")),
-    ("PRIVATE-COMPATIBILITY.md", include_bytes!("../vendor/herdr-resurrect/PRIVATE-COMPATIBILITY.md")),
+    ("SUPERCHARGED-COMPATIBILITY.md", include_bytes!("../vendor/herdr-resurrect/SUPERCHARGED-COMPATIBILITY.md")),
     ("README.md", include_bytes!("../vendor/herdr-resurrect/README.md")),
     ("bin/autosave.js", include_bytes!("../vendor/herdr-resurrect/bin/autosave.js")),
     ("bin/delete-space.js", include_bytes!("../vendor/herdr-resurrect/bin/delete-space.js")),

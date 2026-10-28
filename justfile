@@ -132,7 +132,7 @@ integration-assets-test:
     bun test src/integration/assets/opencode/herdr-agent-state.test.ts
     bun test src/integration/assets/opencode/herdr-tui-session.test.ts
 
-# Live private-distribution test; creates and stops only a disposable server.
+# Live supercharged-distribution test; creates and stops only a disposable server.
 [unix]
 bundled-resurrect-test:
     cargo build --locked --bin herdr

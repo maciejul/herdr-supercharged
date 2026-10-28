@@ -4,7 +4,7 @@
 
 **Experimental.** This fork is an experiment and is not officially supported or endorsed by the Herdr team.
 
-Use the [releases](https://github.com/Maciejul/herdr-supercharged/releases) and [installation guide](docs/private-release.md), including the separate `herdr-supercharged` setup. Fork versions use a `-supercharged.N` suffix. The upstream installer, package-manager commands, badges, and `herdr update` below refer to upstream Herdr; they do not distribute these customizations.
+Use the [releases](https://github.com/maciejul/herdr-supercharged/releases) and [installation guide](docs/supercharged-release.md), including the separate `herdr-supercharged` setup. Fork versions use a `-supercharged.N` suffix. The upstream installer, package-manager commands, badges, and `herdr update` below refer to upstream Herdr; they do not distribute these customizations.
 
 ### Features added in this fork
 
@@ -16,7 +16,7 @@ Use the [releases](https://github.com/Maciejul/herdr-supercharged/releases) and 
 - Idle-session suspension that only applies to read, idle tabs; unread completions, viewed tabs, working or blocked agents and background work are left alone. Suspended tabs keep their names and show a display-only "(Suspended)" suffix.
 - Resource usage reporting: a `server.resource_usage` API (Linux PSS-based) and a client resource usage view.
 - Bundled herdr-resurrect plugin with hourly automatic snapshots and 30-day retention, verified to work across live handoff.
-- Private version scheme (`-supercharged.N`) that stays compatible with upstream version checks.
+- Version scheme (`-supercharged.N`) that stays compatible with upstream version checks.
 
 <p align="center">
   <img src="assets/logo.png" alt="herdr" width="100" />
@@ -58,7 +58,7 @@ https://github.com/user-attachments/assets/043ec09f-4bdd-41d5-aee0-8fda6b83e267
 
 ## install
 
-For the supercharged build, follow the [installation guide](docs/private-release.md).
+For the supercharged build, follow the [installation guide](docs/supercharged-release.md).
 The commands below install upstream Herdr.
 
 ```bash

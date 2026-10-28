@@ -1,24 +1,23 @@
-# Private supercharged releases
+# Supercharged releases
 
-The `Private supercharged release` workflow publishes only to the private
-`Maciejul/herdr-supercharged` repository. It requires a manual dispatch and an
+The `Supercharged release` workflow publishes only to the
+`maciejul/herdr-supercharged` repository. It requires a manual dispatch and an
 existing tag matching `vMAJOR.MINOR.PATCH-supercharged.NUMBER`, such as
-`v0.9.5-supercharged.1`. Both the workflow job and GitHub API checks require this
-repository to remain private. A tag push alone does not trigger this workflow.
+`v0.9.5-supercharged.1`. The workflow job checks the repository name. A tag push alone does not trigger this workflow.
 
 ## Prepare and publish
 
 1. Set the package version in `Cargo.toml` and its package entry in `Cargo.lock`
-   to the intended private version, run the project checks, and commit the release.
+   to the intended version, run the project checks, and commit the release.
 2. Create and push an annotated tag for that commit to `origin`. The tag version
    must equal the package version prefixed with `v`.
 3. Run the workflow from the default branch, supplying the tag:
 
    ```sh
-   gh workflow run private-release.yml --repo Maciejul/herdr-supercharged --ref master -f tag=v0.9.5-supercharged.5
+   gh workflow run supercharged-release.yml --repo maciejul/herdr-supercharged --ref master -f tag=v0.9.5-supercharged.5
    ```
 
-4. Inspect the workflow run and the resulting private release. The workflow
+4. Inspect the workflow run and the resulting release. The workflow
    builds the tagged source, smoke-tests `herdr --version`, uploads a draft,
    downloads its assets to verify their checksums, then publishes it. It refuses
    to overwrite an existing release. If publication fails after draft creation,
@@ -34,7 +33,7 @@ Keep inherited upstream publishing workflows disabled unless separately audited.
 
 ## Assets and compatibility
 
-Private builds include the MIT-licensed `ntindle/herdr-resurrect` add-on inside
+Supercharged builds include the MIT-licensed `ntindle/herdr-resurrect` add-on inside
 the executable. A fresh server installs it locally without GitHub access; Node.js
 16+ must be on PATH, with bash/fzf additionally needed for saved-space overlays.
 There are no npm dependencies. Existing explicit plugin installations are kept,
@@ -51,7 +50,7 @@ native save/restore. A native pending resume plan can recover reporting metadata
 lost by older code; directory-wide "continue" commands never override a suspended
 tab's exact conversation. Manual resume remains available when automatic startup
 resume is disabled. The add-on leaves suspended tabs to native Herdr recovery.
-See `vendor/herdr-resurrect/PRIVATE-COMPATIBILITY.md` for provenance and limitations.
+See `vendor/herdr-resurrect/SUPERCHARGED-COMPATIBILITY.md` for provenance and limitations.
 
 Validate the distribution with `just bundled-resurrect-test`; it checks a fresh
 offline install and real plugin save/preview/restore against a disposable server.
@@ -65,8 +64,8 @@ This workflow builds on Ubuntu 24.04 with the repository-pinned Rust toolchain
 and Zig 0.16.0. The binary requires GNU/glibc; it is not a portable static-musl
 build, and older Linux distributions may not satisfy its runtime libraries.
 macOS, Windows, ARM, signing, and automatic update distribution are outside this
-private workflow. Release downloads require access to the private repository.
-The first private release may be built and published locally; its own metadata
+workflow. Release downloads use the public repository.
+The first release may be built and published locally; its own metadata
 records that environment rather than this workflow's Ubuntu runner.
 
 Download with an authenticated GitHub CLI, verify checksums, then install the
@@ -75,9 +74,9 @@ executable in a user-controlled location. For example:
 To replace your normal `~/.local/bin/herdr` installation on Linux x86_64/WSL:
 
 ```sh
-./scripts/install-private-release.sh
-# Or select a future private release explicitly:
-./scripts/install-private-release.sh v0.9.5-supercharged.5
+./scripts/install-supercharged-release.sh
+# Or select a future release explicitly:
+./scripts/install-supercharged-release.sh v0.9.5-supercharged.5
 ```
 
 The script defaults to `v0.9.5-supercharged.5`, checks the platform and glibc,
@@ -86,11 +85,11 @@ backs up the existing binary and atomically replaces it. It refuses to overwrite
 symlinks. Running servers, configuration, state, and integrations are untouched.
 Restart servers when active work is finished to load server-side changes;
 stopping a server ends its live pane processes. The inherited `herdr update`
-command still targets upstream, so use this script for private upgrades.
+command still targets upstream, so use this script for supercharged upgrades.
 
 ## Run alongside normal Herdr as `herdr-supercharged`
 
-Use this setup to try the optimized private release without replacing
+Use this setup to try the optimized supercharged release without replacing
 `~/.local/bin/herdr`. Run the setup from an external WSL/Linux terminal with
 authenticated `gh` access. The release requires Linux x86_64 and glibc 2.39+.
 The existing `herdr-test` command remains the source/debug-build launcher.
@@ -103,7 +102,7 @@ Download and verify the release, then install it under a separate name:
   release_dir=$(mktemp -d)
   trap 'rm -rf -- "$release_dir"' EXIT
   gh release download v0.9.5-supercharged.5 \
-    --repo Maciejul/herdr-supercharged --dir "$release_dir" \
+    --repo maciejul/herdr-supercharged --dir "$release_dir" \
     --pattern herdr-linux-x86_64 --pattern SHA256SUMS \
     --pattern build-metadata.json
   cd "$release_dir"
@@ -146,7 +145,7 @@ With that function loaded:
 
 ```bash
 herdr-supercharged --version
-herdr-supercharged                 # Launch or reconnect to the private session.
+herdr-supercharged                 # Launch or reconnect to the supercharged session.
 herdr-supercharged server stop     # Only when its active work is finished.
 ```
 
@@ -159,10 +158,10 @@ use separate XDG settings too. Agent integration installation can still modify
 shared agent hook files; this profile is not a sandbox for integration changes.
 
 Repeat the download block with a new tag to update the separate binary. Then
-stop and relaunch the private session when ready; stopping ends its live pane
+stop and relaunch the supercharged session when ready; stopping ends its live pane
 processes. Do not run `herdr-supercharged update`: its updater still targets upstream.
 The replacement installer above targets `~/.local/bin/herdr`, so use this separate
 download procedure when maintaining `herdr-supercharged`.
 
-Publishing a private release does not replace either installed binary or
+Publishing a release does not replace either installed binary or
 configure its updater.
