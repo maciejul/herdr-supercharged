@@ -1042,6 +1042,9 @@ pub struct ServerConfig {
     /// Windows: allow ordinary same-account clients to control an elevated server. Default: false.
     #[cfg(windows)]
     pub allow_unelevated_clients: bool,
+    /// Windows: stop the server (saving the session first) when the client's console window is closed. Default: false.
+    #[cfg(windows)]
+    pub stop_on_window_close: bool,
     /// Virtual terminal width used when no client is attached. Default: 120.
     pub headless_cols: u16,
     /// Virtual terminal height used when no client is attached. Default: 40.
@@ -1316,6 +1319,8 @@ impl Default for ServerConfig {
         Self {
             #[cfg(windows)]
             allow_unelevated_clients: false,
+            #[cfg(windows)]
+            stop_on_window_close: false,
             headless_cols: crate::config::DEFAULT_HEADLESS_COLS,
             headless_rows: crate::config::DEFAULT_HEADLESS_ROWS,
         }

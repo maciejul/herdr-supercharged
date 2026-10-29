@@ -40,6 +40,8 @@ mod terminal_sessions;
 mod terminal_setup;
 mod timer;
 mod transport;
+#[cfg(windows)]
+mod window_close;
 
 #[cfg(test)]
 use clipboard_forwarding::decode_clipboard_payload;
@@ -347,6 +349,11 @@ fn run_client_with_mode(
         .map_err(io::Error::other)?;
 
     let should_quit = Arc::new(AtomicBool::new(false));
+
+    #[cfg(windows)]
+    if loaded_config.config.server.stop_on_window_close && !is_remote_client_process() {
+        window_close::install_stop_server_handler();
+    }
 
     // ctrlc's "termination" feature also catches SIGTERM/SIGHUP so direct
     // termination signals still run the quit path and TerminalGuard::Drop.
