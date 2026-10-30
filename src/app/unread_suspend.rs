@@ -525,9 +525,12 @@ mod tests {
 
     #[tokio::test]
     async fn read_idle_suspension_background_burst_resets_timer_between_sweeps() {
+        // A short delay keeps `now - delay` valid on a freshly booted machine, where the
+        // monotonic clock can be younger than an hour.
+        const DELAY: u64 = 60;
         let now = Instant::now();
-        let (mut app, pane_id, _) = setup(now - Duration::from_secs(3600), Agent::Claude);
-        app.unread_suspend_delay_seconds = 3600;
+        let (mut app, pane_id, _) = setup(now - Duration::from_secs(DELAY), Agent::Claude);
+        app.unread_suspend_delay_seconds = DELAY;
         let public_id = app.public_pane_id(0, pane_id).unwrap();
         for items in [serde_json::json!([{"id":"task"}]), serde_json::json!([])] {
             let request = serde_json::from_value(serde_json::json!({
@@ -547,7 +550,7 @@ mod tests {
             .suspension_reset_at
             .unwrap();
         assert!(!app.suspend_read_agents(reset, &Default::default()));
-        assert!(app.suspend_read_agents(reset + Duration::from_secs(3600), &Default::default()));
+        assert!(app.suspend_read_agents(reset + Duration::from_secs(DELAY), &Default::default()));
     }
 
     #[tokio::test]

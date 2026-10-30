@@ -1,5 +1,15 @@
 use super::harness::*;
 
+/// Plugins in a `plugin list` response, without the resurrect plugin bundled into the binary.
+fn user_plugins(listed: &serde_json::Value) -> Vec<&serde_json::Value> {
+    listed["result"]["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|plugin| plugin["plugin_id"] != "ntindle.herdr-resurrect")
+        .collect()
+}
+
 #[test]
 fn named_sessions_share_live_plugin_registry() {
     let base = unique_test_dir();
@@ -74,7 +84,7 @@ fn named_sessions_share_live_plugin_registry() {
         &runtime_dir,
         &["--session", "beta", "plugin", "list", "--json"],
     );
-    assert_eq!(beta_list["result"]["plugins"].as_array().unwrap().len(), 2);
+    assert_eq!(user_plugins(&beta_list).len(), 2);
 
     run_named_cli_json(
         &config_home,
@@ -968,7 +978,7 @@ command = ["sh", "-c", "sleep 5"]
     assert_eq!(unlinked["result"]["removed"], true);
 
     let listed = run_cli_json(&socket_path, &["plugin", "list", "--json"]);
-    assert!(listed["result"]["plugins"].as_array().unwrap().is_empty());
+    assert!(user_plugins(&listed).is_empty());
 
     cleanup_spawned_herdr(herdr, base);
 }
