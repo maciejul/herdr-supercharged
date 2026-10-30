@@ -18,6 +18,8 @@ ALLOWED_TYPES = {
     "release",
 }
 SUBJECT_RE = re.compile(r"^(?P<kind>[a-z]+)(?:\([^)]+\))?!?:\s+\S")
+# Release commits of the supercharged fork, as written by docs/supercharged-release.md.
+SUPERCHARGED_RELEASE_RE = re.compile(r"^Release \d+\.\d+\.\d+-supercharged\.\d+$")
 
 
 def git_subjects(rev_range: str) -> list[str]:
@@ -28,6 +30,8 @@ def git_subjects(rev_range: str) -> list[str]:
 
 
 def valid_subject(subject: str) -> bool:
+    if SUPERCHARGED_RELEASE_RE.match(subject):
+        return True
     match = SUBJECT_RE.match(subject)
     return bool(match and match.group("kind") in ALLOWED_TYPES)
 

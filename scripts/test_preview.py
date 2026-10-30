@@ -158,6 +158,15 @@ class ConventionalCommitTests(unittest.TestCase):
         self.assertTrue(conventional_commits.valid_subject("feat!: change config"))
         self.assertFalse(conventional_commits.valid_subject("update preview channel"))
 
+    def test_supercharged_release_subjects_are_allowed(self):
+        self.assertTrue(
+            conventional_commits.valid_subject("Release 0.9.5-supercharged.7")
+        )
+        self.assertFalse(conventional_commits.valid_subject("Release 0.9.5"))
+        self.assertFalse(
+            conventional_commits.valid_subject("Release 0.9.5-supercharged.7 now")
+        )
+
     def test_commit_message_subject_skips_comments(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "COMMIT_EDITMSG"

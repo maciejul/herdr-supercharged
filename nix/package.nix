@@ -44,6 +44,7 @@ rustPlatform.buildRustPackage {
         ../distribution/install.ps1
         ../docs/next/api/herdr-api.schema.json
         ../src
+        ../vendor/herdr-resurrect
         ../vendor/libghostty-vt
         ../vendor/libghostty-vt.vendor.json
         ../vendor/portable-pty
