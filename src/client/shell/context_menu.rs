@@ -10,6 +10,7 @@ impl ClientContextMenuOverlay {
                 item("Rename group", Action::Rename),
                 item("Ungroup spaces", Action::RemoveSpaceGroup),
                 item("New workspace", Action::NewWorkspaceInGroup),
+                item("Suspend group", Action::Suspend),
             ],
             ClientContextMenuTarget::Workspace { is_git: false, .. } => {
                 vec![item("Rename", Action::Rename), item("Close", Action::Close)]
@@ -85,8 +86,18 @@ impl ClientContextMenuOverlay {
                 items
             }
         };
-        if groups_enabled && matches!(self.target, ClientContextMenuTarget::Workspace { .. }) {
-            items.push(item("Move to group", Action::MoveToSpaceGroup));
+        if let ClientContextMenuTarget::Workspace { close_group, .. } = &self.target {
+            items.push(item(
+                if *close_group {
+                    "Suspend group"
+                } else {
+                    "Suspend"
+                },
+                Action::Suspend,
+            ));
+            if groups_enabled {
+                items.push(item("Move to group", Action::MoveToSpaceGroup));
+            }
         }
         items
     }
@@ -212,6 +223,16 @@ impl ClientShellState {
                     self.new_workspace_in_group(index, outcome)
                 }
                 ClientContextMenuAction::Rename => self.open_space_group_editor(None, Some(index)),
+                ClientContextMenuAction::Suspend => {
+                    let workspace_ids = self
+                        .config
+                        .preferences
+                        .space_groups
+                        .get(index)
+                        .map(|group| group.workspace_ids.clone())
+                        .unwrap_or_default();
+                    self.request_workspace_suspend(workspace_ids, false, outcome);
+                }
                 ClientContextMenuAction::RemoveSpaceGroup
                     if index < self.config.preferences.space_groups.len() =>
                 {
@@ -282,6 +303,9 @@ impl ClientShellState {
             ClientContextMenuAction::Close => {
                 self.request_workspace_close(workspace_id, Some(close_group), outcome);
             }
+            ClientContextMenuAction::Suspend => {
+                self.request_workspace_suspend(vec![workspace_id], close_group, outcome);
+            }
             ClientContextMenuAction::NewWorktree => {
                 self.begin_worktree_action_for(KeybindAction::NewWorktree, workspace_id, outcome)
             }
@@ -308,6 +332,33 @@ impl ClientShellState {
             }
             _ => {}
         }
+    }
+
+    fn request_workspace_suspend(
+        &mut self,
+        workspace_ids: Vec<String>,
+        group: bool,
+        outcome: &mut ClientShellInput,
+    ) {
+        if workspace_ids.is_empty() {
+            self.push_endpoint_notice(
+                ClientEndpointNoticeKind::Rejected,
+                "workspace.suspend:empty",
+                "Nothing to suspend",
+                "This group has no spaces.",
+            );
+            return;
+        }
+        self.push_endpoint_method_with_kind(
+            crate::api::schema::Method::WorkspaceSuspend(
+                crate::api::schema::WorkspaceSuspendParams {
+                    workspace_ids,
+                    group,
+                },
+            ),
+            PendingEndpointKind::WorkspaceSuspend,
+            outcome,
+        );
     }
 
     fn activate_tab_context_action(

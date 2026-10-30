@@ -163,6 +163,7 @@ mod tests {
             "workspace.move_block",
             "workspace.report_metadata",
             "workspace.close",
+            "workspace.suspend",
             "worktree.create",
             "worktree.open",
             "worktree.remove",

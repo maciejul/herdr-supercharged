@@ -280,6 +280,12 @@ pub enum ResponseResult {
     ResourceUsage {
         sample: Option<crate::platform::resource_usage::ResourceUsage>,
     },
+    /// Result of `workspace.suspend`. Skipped tabs held a running agent that was in view,
+    /// busy, or had no exact saved session; they keep running.
+    WorkspaceSuspended {
+        suspended_tabs: u32,
+        skipped_tabs: u32,
+    },
     Ok {},
 }
 

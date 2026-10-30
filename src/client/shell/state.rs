@@ -541,6 +541,7 @@ pub(super) enum ClientContextMenuAction {
     RemoveSpaceGroup,
     Rename,
     Close,
+    Suspend,
     NewWorktree,
     OpenWorktree,
     RemoveWorktree,
@@ -669,6 +670,7 @@ pub(super) enum PendingEndpointKind {
     BackgroundTracking,
     UnreadSuspendDelay,
     ResourceUsage,
+    WorkspaceSuspend,
     IntegrationList,
     IntegrationInstall,
     PrepareWorktreeCreate {

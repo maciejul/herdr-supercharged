@@ -251,6 +251,10 @@ mod tests {
             Some("048eb24c360c2fff4c3c725194e458842e2f30adcf0a72b67b5b66d99bc60b2b")
         );
         assert_eq!(
+            actual.remove("workspace.suspend").as_deref(),
+            Some("d70e65c323378c120db801d5b357a2e2ff30df04a9696973aab3932b508d3eca")
+        );
+        assert_eq!(
             actual.remove("pane.clear").as_deref(),
             Some("0301d288ba198ddaa427dd7421c71911cccaf4ea03544531efa8b67ca21b08f6")
         );

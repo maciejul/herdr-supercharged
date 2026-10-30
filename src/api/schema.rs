@@ -146,6 +146,7 @@ operations::define_operations! {
     PluginPaneFocus(PluginPaneFocusParams) => "plugin.pane.focus", true, false;
     PluginPaneClose(PluginPaneCloseParams) => "plugin.pane.close", true, false;
     ServerResourceUsage(EmptyParams) => "server.resource_usage", false, true;
+    WorkspaceSuspend(WorkspaceSuspendParams) => "workspace.suspend", true, true;
 }
 
 #[cfg(test)]

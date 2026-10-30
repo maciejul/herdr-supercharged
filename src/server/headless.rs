@@ -3037,6 +3037,12 @@ impl HeadlessServer {
         };
 
         self.sync_foreground_client_state();
+        if matches!(
+            &msg.request.method,
+            api::schema::Method::WorkspaceSuspend(_)
+        ) {
+            self.app.manual_suspend_protected = self.panes_in_view_of_any_client();
+        }
         if let Some(error) = self.agent_read_not_idle_error(&msg.request) {
             let response = serde_json::to_string(&api::schema::ErrorResponse {
                 id: msg.request.id.clone(),
@@ -3281,6 +3287,26 @@ impl HeadlessServer {
         changed
     }
 
+    /// Panes an attached client is showing or streaming; suspension must leave them running.
+    fn panes_in_view_of_any_client(&self) -> std::collections::HashSet<crate::layout::PaneId> {
+        self.app
+            .state
+            .workspaces
+            .iter()
+            .flat_map(|ws| &ws.tabs)
+            .flat_map(|tab| &tab.panes)
+            .filter(|(id, pane)| {
+                self.any_shell_surface_contains_pane(**id)
+                    || !terminal_stream_client_ids(
+                        &self.clients,
+                        pane.attached_terminal_id.as_str(),
+                    )
+                    .is_empty()
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     /// Handle scheduled tasks for the headless server.
     ///
     /// Similar to the former App scheduler but without terminal resize polling.
@@ -3294,23 +3320,7 @@ impl HeadlessServer {
             .unread_suspend_check_at
             .is_none_or(|next| now >= next)
         {
-            let protected = self
-                .app
-                .state
-                .workspaces
-                .iter()
-                .flat_map(|ws| &ws.tabs)
-                .flat_map(|tab| &tab.panes)
-                .filter(|(id, pane)| {
-                    self.any_shell_surface_contains_pane(**id)
-                        || !terminal_stream_client_ids(
-                            &self.clients,
-                            pane.attached_terminal_id.as_str(),
-                        )
-                        .is_empty()
-                })
-                .map(|(id, _)| *id)
-                .collect();
+            let protected = self.panes_in_view_of_any_client();
             self.app.suspend_read_agents(now, &protected)
         } else {
             false

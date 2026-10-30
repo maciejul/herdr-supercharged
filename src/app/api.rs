@@ -1103,6 +1103,9 @@ impl App {
             Method::WorkspaceClose(target) => {
                 return self.handle_workspace_close(request.id, target);
             }
+            Method::WorkspaceSuspend(params) => {
+                return self.handle_workspace_suspend(request.id, params);
+            }
             Method::WorktreeList(_) | Method::WorktreeOpen(_) => {
                 return responses::encode_error(
                     request.id,

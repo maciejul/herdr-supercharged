@@ -163,6 +163,9 @@ pub struct App {
     pub(crate) last_render_at: Option<Instant>,
     pub(crate) read_idle_since: std::collections::HashMap<crate::layout::PaneId, Instant>,
     pub(crate) unread_suspend_check_at: Option<Instant>,
+    /// Panes in view of any attached client, supplied by the server for the next
+    /// `workspace.suspend` request; empty when no server owns the app.
+    pub(crate) manual_suspend_protected: std::collections::HashSet<crate::layout::PaneId>,
     pub(crate) unread_suspend_delay_seconds: u64,
     pub(crate) next_resurrect_snapshot_at: Option<Instant>,
     pub(crate) pending_resurrect_snapshot_log_id: Option<String>,
@@ -689,6 +692,7 @@ impl App {
             last_render_at: None,
             read_idle_since: Default::default(),
             unread_suspend_check_at: None,
+            manual_suspend_protected: Default::default(),
             pending_resurrect_snapshot_log_id: None,
             next_resurrect_snapshot_at: policy
                 .persist_session

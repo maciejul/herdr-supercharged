@@ -14,6 +14,7 @@ Use the [releases](https://github.com/maciejul/herdr-supercharged/releases) and 
 - Configurable agent activity and completion indicators.
 - Background-task tracking, including Codex background activity routing and completion (with an opt-in zsh helper for per-pane Codex launches).
 - Idle-session suspension that only applies to read, idle tabs; unread completions, viewed tabs, working or blocked agents and background work are left alone. Suspended tabs keep their names and show a display-only "(Suspended)" suffix.
+- Suspend a workspace, worktree group or Space group on demand from its right-click menu (`workspace.suspend` API); tabs in view, busy agents and agents without a saved session keep running.
 - Resource usage reporting: a `server.resource_usage` API (Linux PSS-based) and a client resource usage view.
 - Bundled herdr-resurrect plugin with hourly automatic snapshots and 30-day retention, verified to work across live handoff.
 - Version scheme (`-supercharged.N`) that stays compatible with upstream version checks.

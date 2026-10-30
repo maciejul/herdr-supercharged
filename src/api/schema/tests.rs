@@ -207,6 +207,29 @@ fn generated_protocol_schema_artifact_is_current() {
 }
 
 #[test]
+fn workspace_suspend_defaults_to_the_listed_workspaces_only() {
+    let request: Request = serde_json::from_value(serde_json::json!({
+        "id": "suspend",
+        "method": "workspace.suspend",
+        "params": {"workspace_ids": ["w1", "w2"]}
+    }))
+    .unwrap();
+    assert_eq!(
+        request.method,
+        Method::WorkspaceSuspend(WorkspaceSuspendParams {
+            workspace_ids: vec!["w1".into(), "w2".into()],
+            group: false,
+        })
+    );
+    let json = serde_json::to_value(&request).unwrap();
+    assert!(json["params"].get("group").is_none());
+    assert_eq!(
+        crate::api::api_method_name(&request.method),
+        "workspace.suspend"
+    );
+}
+
+#[test]
 fn request_round_trips_for_server_stop() {
     let request = Request {
         id: "req_stop".into(),

@@ -535,6 +535,7 @@ impl ClientShellState {
                 | PendingEndpointKind::ReloadConfig
                 | PendingEndpointKind::BackgroundTracking
                 | PendingEndpointKind::ResourceUsage
+                | PendingEndpointKind::WorkspaceSuspend
                 | PendingEndpointKind::UnreadSuspendDelay
                 | PendingEndpointKind::IntegrationList
                 | PendingEndpointKind::IntegrationInstall

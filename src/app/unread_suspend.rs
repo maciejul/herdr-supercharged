@@ -12,6 +12,13 @@ const DELAY_SECONDS: [u64; 6] = [0, 3600, 4 * 3600, 8 * 3600, 24 * 3600, 48 * 36
 #[cfg(test)]
 const UNREAD_TIMEOUT: Duration = Duration::from_secs(DEFAULT_DELAY_SECONDS);
 
+/// A pane whose agent will be closed, with the plan that resumes its exact session.
+type SuspendPlan = (
+    crate::layout::PaneId,
+    crate::terminal::TerminalId,
+    AgentResumePlan,
+);
+
 fn setting_path() -> std::path::PathBuf {
     crate::config::state_dir().join("unread-suspension.json")
 }
@@ -140,48 +147,17 @@ impl App {
             for (tab_index, tab) in ws.tabs.iter().enumerate() {
                 let viewed = (self.state.active == Some(ws_index) && ws.active_tab == tab_index)
                     || tab.panes.keys().any(|id| protected.contains(id));
-                let unsafe_tab = tab.panes.values().any(|pane| {
-                    !pane.seen
-                        || self
-                            .state
-                            .terminals
-                            .get(&pane.attached_terminal_id)
-                            .is_none_or(|terminal| {
-                                (terminal.effective_agent_label().is_some()
-                                    && terminal.state != AgentState::Idle)
-                                    || has_background_work(terminal)
-                            })
-                });
+                let unsafe_tab = tab
+                    .panes
+                    .values()
+                    .any(|pane| !pane.seen || self.pane_agent_busy(pane));
                 if viewed || unsafe_tab {
                     continue;
                 }
-                // A split tab is suspended only if every running agent can be resumed.
-                let mut plans = Vec::new();
-                let mut safe = true;
-                for (&pane_id, pane) in &tab.panes {
-                    if pane.suspended
-                        || self
-                            .terminal_runtimes
-                            .get(&pane.attached_terminal_id)
-                            .is_none()
-                    {
-                        continue;
-                    }
-                    let Some(terminal) = self.state.terminals.get(&pane.attached_terminal_id)
-                    else {
-                        safe = false;
-                        break;
-                    };
-                    if terminal.effective_agent_label().is_none() {
-                        continue;
-                    }
-                    let Some(plan) = resume_plan(terminal) else {
-                        safe = false;
-                        break;
-                    };
-                    plans.push((pane_id, pane.attached_terminal_id.clone(), plan));
-                }
-                if safe && !plans.is_empty() {
+                if let Some(plans) = self
+                    .tab_suspend_plans(tab)
+                    .filter(|plans| !plans.is_empty())
+                {
                     let mut since = previous.get(&tab.root_pane).copied().unwrap_or(now);
                     if let Some(reset) = tab
                         .panes
@@ -198,6 +174,92 @@ impl App {
                 }
             }
         }
+        self.commit_suspensions(candidates)
+    }
+
+    /// Suspends the idle agents of the given workspaces on request. Unlike the timed
+    /// suspension, unread completions are kept (the pane stays unread) because the user chose
+    /// the action; tabs in view, with working/blocked agents or background work, or with an
+    /// agent lacking an exact saved session still keep running. Returns the number of tabs
+    /// suspended and the number of tabs with running agents that were skipped.
+    pub(crate) fn suspend_workspaces(
+        &mut self,
+        workspace_indices: &[usize],
+        protected: &std::collections::HashSet<crate::layout::PaneId>,
+    ) -> (u32, u32) {
+        let mut candidates = Vec::new();
+        let (mut suspended_tabs, mut skipped_tabs) = (0, 0);
+        for &ws_index in workspace_indices {
+            let Some(ws) = self.state.workspaces.get(ws_index) else {
+                continue;
+            };
+            for (tab_index, tab) in ws.tabs.iter().enumerate() {
+                let has_running_agent = tab.panes.values().any(|pane| {
+                    !pane.suspended
+                        && self
+                            .terminal_runtimes
+                            .get(&pane.attached_terminal_id)
+                            .is_some()
+                        && self
+                            .state
+                            .terminals
+                            .get(&pane.attached_terminal_id)
+                            .is_some_and(|terminal| terminal.effective_agent_label().is_some())
+                });
+                if !has_running_agent {
+                    continue;
+                }
+                let viewed = (self.state.active == Some(ws_index) && ws.active_tab == tab_index)
+                    || tab.panes.keys().any(|id| protected.contains(id));
+                let busy = tab.panes.values().any(|pane| self.pane_agent_busy(pane));
+                match self.tab_suspend_plans(tab) {
+                    Some(plans) if !viewed && !busy && !plans.is_empty() => {
+                        candidates.extend(plans);
+                        suspended_tabs += 1;
+                    }
+                    _ => skipped_tabs += 1,
+                }
+            }
+        }
+        self.commit_suspensions(candidates);
+        (suspended_tabs, skipped_tabs)
+    }
+
+    /// An agent that is working or blocked, has reported background work, or is not tracked yet.
+    fn pane_agent_busy(&self, pane: &crate::pane::PaneState) -> bool {
+        self.state
+            .terminals
+            .get(&pane.attached_terminal_id)
+            .is_none_or(|terminal| {
+                (terminal.effective_agent_label().is_some() && terminal.state != AgentState::Idle)
+                    || has_background_work(terminal)
+            })
+    }
+
+    /// Resume plans for every running agent in the tab. A split tab is suspended only if every
+    /// running agent can be resumed, so any agent without an exact session yields `None`.
+    fn tab_suspend_plans(&self, tab: &crate::workspace::Tab) -> Option<Vec<SuspendPlan>> {
+        let mut plans = Vec::new();
+        for (&pane_id, pane) in &tab.panes {
+            if pane.suspended
+                || self
+                    .terminal_runtimes
+                    .get(&pane.attached_terminal_id)
+                    .is_none()
+            {
+                continue;
+            }
+            let terminal = self.state.terminals.get(&pane.attached_terminal_id)?;
+            if terminal.effective_agent_label().is_none() {
+                continue;
+            }
+            let plan = resume_plan(terminal)?;
+            plans.push((pane_id, pane.attached_terminal_id.clone(), plan));
+        }
+        Some(plans)
+    }
+
+    fn commit_suspensions(&mut self, candidates: Vec<SuspendPlan>) -> bool {
         let changed = !candidates.is_empty();
         for (pane_id, terminal_id, plan) in candidates {
             if let Some(terminal) = self.state.terminals.get_mut(&terminal_id) {
@@ -209,7 +271,6 @@ impl App {
             for ws in &mut self.state.workspaces {
                 if let Some(pane) = ws.pane_state_mut(pane_id) {
                     pane.suspended = true;
-                    pane.seen = true;
                     pane.suspended_resume_requested = false;
                     pane.suspension_exit_pending = true;
                     break;
@@ -487,6 +548,122 @@ mod tests {
             .unwrap();
         assert!(!app.suspend_read_agents(reset, &Default::default()));
         assert!(app.suspend_read_agents(reset + Duration::from_secs(3600), &Default::default()));
+    }
+
+    #[tokio::test]
+    async fn manual_suspension_does_not_wait_for_read_idle_time() {
+        let now = Instant::now();
+        let (mut app, pane_id, terminal_id) = setup(now, Agent::Claude);
+        assert_eq!(app.suspend_workspaces(&[0], &Default::default()), (1, 0));
+        let pane = app.state.workspaces[0].pane_state(pane_id).unwrap();
+        assert!(pane.suspended && pane.suspension_exit_pending);
+        assert!(app.terminal_runtimes.get(&terminal_id).is_none());
+        // A second request finds nothing left to do rather than skipping the suspended tab.
+        assert_eq!(app.suspend_workspaces(&[0], &Default::default()), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn manual_suspension_keeps_viewed_and_busy_tabs_running() {
+        let now = Instant::now();
+        let (mut app, pane_id, terminal_id) = setup(now, Agent::Claude);
+
+        app.state.active = Some(0);
+        app.state.workspaces[0].active_tab = 0;
+        assert_eq!(app.suspend_workspaces(&[0], &Default::default()), (0, 1));
+
+        app.state.workspaces[0].active_tab = 1;
+        let viewed_elsewhere = std::collections::HashSet::from([pane_id]);
+        assert_eq!(app.suspend_workspaces(&[0], &viewed_elsewhere), (0, 1));
+
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_detected_state_with_screen_signals_at(
+                Some(Agent::Claude),
+                AgentState::Working,
+                false,
+                false,
+                false,
+                false,
+                now,
+            );
+        assert_eq!(app.suspend_workspaces(&[0], &Default::default()), (0, 1));
+
+        assert!(app.terminal_runtimes.get(&terminal_id).is_some());
+        assert!(
+            !app.state.workspaces[0]
+                .pane_state(pane_id)
+                .unwrap()
+                .suspended
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_suspension_keeps_unread_completion_marked_unread() {
+        let now = Instant::now();
+        let (mut app, pane_id, terminal_id) = setup(now, Agent::Codex);
+        app.state.workspaces[0]
+            .pane_state_mut(pane_id)
+            .unwrap()
+            .seen = false;
+        assert_eq!(app.suspend_workspaces(&[0], &Default::default()), (1, 0));
+        let pane = app.state.workspaces[0].pane_state(pane_id).unwrap();
+        assert!(pane.suspended && !pane.seen);
+        assert!(app.terminal_runtimes.get(&terminal_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn manual_suspension_leaves_split_tab_running_when_one_agent_cannot_resume() {
+        let now = Instant::now();
+        let (mut app, pane_id, terminal_id) = setup(now, Agent::Claude);
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .persisted_agent_session = None;
+        assert_eq!(app.suspend_workspaces(&[0], &Default::default()), (0, 1));
+        assert!(
+            !app.state.workspaces[0]
+                .pane_state(pane_id)
+                .unwrap()
+                .suspended
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_suspend_api_reports_counts_and_rejects_unknown_workspaces() {
+        let now = Instant::now();
+        let (mut app, pane_id, terminal_id) = setup(now, Agent::Claude);
+        let workspace_id = app.public_workspace_id(0);
+
+        let missing = app.handle_api_request(
+            serde_json::from_value(serde_json::json!({
+                "id": "suspend-missing", "method": "workspace.suspend",
+                "params": {"workspace_ids": ["w-missing"]}
+            }))
+            .unwrap(),
+        );
+        assert!(missing.contains("workspace_not_found"), "{missing}");
+        assert!(app.terminal_runtimes.get(&terminal_id).is_some());
+
+        let response = app.handle_api_request(
+            serde_json::from_value(serde_json::json!({
+                "id": "suspend", "method": "workspace.suspend",
+                "params": {"workspace_ids": [workspace_id]}
+            }))
+            .unwrap(),
+        );
+        let value: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(value["result"]["type"], "workspace_suspended", "{response}");
+        assert_eq!(value["result"]["suspended_tabs"], 1);
+        assert_eq!(value["result"]["skipped_tabs"], 0);
+        assert!(
+            app.state.workspaces[0]
+                .pane_state(pane_id)
+                .unwrap()
+                .suspended
+        );
     }
 
     #[tokio::test]

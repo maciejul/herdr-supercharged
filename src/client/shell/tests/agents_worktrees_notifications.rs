@@ -1682,3 +1682,99 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     assert!(state.visible_notification.is_none());
     assert_eq!(state.pending_notifications.len(), 1);
 }
+
+#[test]
+fn workspace_context_menu_suspend_requests_workspace_suspension() {
+    use crate::api::schema::Method;
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    let workspace_id = state.snapshot.as_deref().unwrap().workspaces[0]
+        .workspace_id
+        .clone();
+
+    state.open_workspace_context_menu(workspace_id.clone(), 0, 0);
+    let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
+        panic!("workspace context menu");
+    };
+    let items = menu.items(true);
+    let index = items
+        .iter()
+        .position(|item| matches!(item.action, ClientContextMenuAction::Suspend))
+        .expect("suspend item");
+    assert_eq!(items[index].label, "Suspend");
+    assert_eq!(items.last().unwrap().label, "Move to group");
+
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut outcome);
+    assert!(matches!(outcome.actions.as_slice(),
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(&request.method, Method::WorkspaceSuspend(params)
+                if params.workspace_ids == [workspace_id.clone()] && !params.group)));
+}
+
+#[test]
+fn space_group_context_menu_suspends_every_member_workspace() {
+    use crate::api::schema::Method;
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state
+        .config
+        .preferences
+        .space_groups
+        .push(super::super::preferences::NamedSpaceGroup {
+            endpoint: "local".to_owned(),
+            name: "Development".to_owned(),
+            workspace_ids: vec!["ws_1".to_owned(), "ws_2".to_owned()],
+            collapsed: false,
+        });
+    state.overlay = Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+        target: ClientContextMenuTarget::SpaceGroup { index: 0 },
+        x: 0,
+        y: 0,
+        highlighted: 0,
+    }));
+    let Some(ClientShellOverlay::ContextMenu(menu)) = state.overlay.as_ref() else {
+        panic!("space group context menu");
+    };
+    let index = menu
+        .items(true)
+        .iter()
+        .position(|item| matches!(item.action, ClientContextMenuAction::Suspend))
+        .expect("suspend group item");
+
+    let mut outcome = ClientShellInput::default();
+    state.activate_context_menu_item(index, &mut outcome);
+    assert!(matches!(outcome.actions.as_slice(),
+        [ClientShellAction::Endpoint { request, .. }]
+            if matches!(&request.method, Method::WorkspaceSuspend(params)
+                if params.workspace_ids == ["ws_1", "ws_2"] && !params.group)));
+}
+
+#[test]
+fn workspace_suspend_result_reports_only_what_was_not_suspended() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+
+    assert!(!state.notify_workspace_suspended(2, 0));
+    assert!(state.visible_endpoint_notice.is_none());
+
+    assert!(state.notify_workspace_suspended(0, 0));
+    assert_eq!(
+        state.visible_endpoint_notice.as_ref().unwrap().title,
+        "Nothing to suspend"
+    );
+
+    assert!(state.notify_workspace_suspended(0, 2));
+    let notice = state.visible_endpoint_notice.as_ref().unwrap();
+    assert_eq!(notice.title, "Nothing suspended");
+    assert!(notice.body.starts_with("2 tabs kept running"));
+
+    assert!(state.notify_workspace_suspended(1, 1));
+    let notice = state.visible_endpoint_notice.as_ref().unwrap();
+    assert_eq!(notice.title, "Suspended 1 tab");
+    assert!(notice.body.starts_with("1 tab kept running"));
+}

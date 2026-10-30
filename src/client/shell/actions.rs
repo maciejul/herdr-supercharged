@@ -352,6 +352,42 @@ impl ClientShellState {
         true
     }
 
+    /// Tab labels already show `(Suspended)`, so only report what did not happen.
+    pub(super) fn notify_workspace_suspended(
+        &mut self,
+        suspended_tabs: u32,
+        skipped_tabs: u32,
+    ) -> bool {
+        let plural = |count: u32| if count == 1 { "tab" } else { "tabs" };
+        let (title, body) = match (suspended_tabs, skipped_tabs) {
+            (0, 0) => (
+                "Nothing to suspend".to_owned(),
+                "No Claude or Codex sessions are running there.".to_owned(),
+            ),
+            (_, 0) => return false,
+            (0, skipped) => (
+                "Nothing suspended".to_owned(),
+                format!(
+                    "{skipped} {} kept running: in view, working, or without a saved session.",
+                    plural(skipped)
+                ),
+            ),
+            (suspended, skipped) => (
+                format!("Suspended {suspended} {}", plural(suspended)),
+                format!(
+                    "{skipped} {} kept running: in view, working, or without a saved session.",
+                    plural(skipped)
+                ),
+            ),
+        };
+        self.push_endpoint_notice(
+            ClientEndpointNoticeKind::Rejected,
+            "workspace.suspend",
+            title,
+            body,
+        )
+    }
+
     pub(super) fn push_endpoint_method_with_kind(
         &mut self,
         method: crate::api::schema::Method,
@@ -872,6 +908,22 @@ impl ClientShellState {
                     Ok(_) => {
                         self.set_endpoint_error(
                             "endpoint returned an unexpected config reload result",
+                        );
+                        true
+                    }
+                    Err(_) => true,
+                };
+                return (repaint, Vec::new());
+            }
+            PendingEndpointKind::WorkspaceSuspend => {
+                let repaint = match result {
+                    Ok(crate::api::schema::ResponseResult::WorkspaceSuspended {
+                        suspended_tabs,
+                        skipped_tabs,
+                    }) => self.notify_workspace_suspended(suspended_tabs, skipped_tabs),
+                    Ok(_) => {
+                        self.set_endpoint_error(
+                            "endpoint returned an unexpected workspace suspend result",
                         );
                         true
                     }

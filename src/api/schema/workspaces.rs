@@ -60,6 +60,16 @@ pub struct WorkspaceMoveBlockParams {
     pub before_workspace_id: Option<String>,
 }
 
+/// Closes the idle Claude/Codex sessions in the listed workspaces without closing their tabs.
+/// Suspended tabs resume their saved conversations when opened.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkspaceSuspendParams {
+    pub workspace_ids: Vec<String>,
+    /// Expands each workspace to the whole worktree group it heads.
+    #[serde(default, skip_serializing_if = "super::is_false")]
+    pub group: bool,
+}
+
 cli_params! {
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct WorkspaceReportMetadataParams => WorkspaceMetadataProjection {

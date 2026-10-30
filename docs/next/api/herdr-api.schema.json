@@ -4512,6 +4512,25 @@
           ],
           "type": "object"
         },
+        "WorkspaceSuspendParams": {
+          "description": "Closes the idle Claude/Codex sessions in the listed workspaces without closing their tabs.\nSuspended tabs resume their saved conversations when opened.",
+          "properties": {
+            "group": {
+              "description": "Expands each workspace to the whole worktree group it heads.",
+              "type": "boolean"
+            },
+            "workspace_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "workspace_ids"
+          ],
+          "type": "object"
+        },
         "WorkspaceTarget": {
           "properties": {
             "workspace_id": {
@@ -6321,6 +6340,22 @@
             },
             "params": {
               "$ref": "#/schemas/request/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "workspace.suspend",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/schemas/request/$defs/WorkspaceSuspendParams"
             }
           },
           "required": [
@@ -10495,6 +10530,31 @@
               },
               "required": [
                 "type"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Result of `workspace.suspend`. Skipped tabs held a running agent that was in view,\nbusy, or had no exact saved session; they keep running.",
+              "properties": {
+                "skipped_tabs": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "suspended_tabs": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "type": {
+                  "const": "workspace_suspended",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "suspended_tabs",
+                "skipped_tabs"
               ],
               "type": "object"
             },

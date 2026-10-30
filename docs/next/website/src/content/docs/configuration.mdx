@@ -718,6 +718,12 @@ The endpoint server saves this setting in its local state directory (`unread-sus
 
 Suspension requires an exact saved session identity. Unread tabs, tabs viewed by any attached client, and tabs with working or blocked agents, reported background tasks, or agents without a supported resume identity stay running. Shell-only panes remain open. Suspended tabs survive server restarts when agent session restore is enabled; the read/idle countdown for running sessions starts again after restart. Reading or using a tab resets its inactivity timer. The legacy settings filename and command identifiers are retained for compatibility.
 
+### Suspend on demand
+
+Right-click a workspace in the sidebar and choose **Suspend** to suspend it immediately instead of waiting for the delay. On a workspace that heads a worktree group the item reads **Suspend group** and covers every workspace in the group, and right-clicking a personal Space group header offers **Suspend group** for all of its Spaces. Tabs are suspended exactly as above, with two differences: an unread completion is suspended too and stays marked unread, and no idle time is required.
+
+Tabs you or any other attached client are viewing, tabs with working or blocked agents or reported background tasks, and tabs with an agent that has no exact saved session keep running. If any of those tabs are skipped, a short notice says how many. The same action is available to scripts as the `workspace.suspend` API method (`workspace_ids`, plus `group` to expand worktree groups). Older servers show the action as unavailable until they are updated and restarted.
+
 ## IME cursor tracking
 
 On macOS, AI Agent TUIs that hide the hardware cursor can prevent native input-method candidate windows from following the focused pane. Reveal a cursor anchor for those panes with:

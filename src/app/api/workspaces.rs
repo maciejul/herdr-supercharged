@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::api::schema::{
     EventData, EventEnvelope, EventKind, ResponseResult, WorkspaceCloseParams,
     WorkspaceCreateParams, WorkspaceMoveBlockParams, WorkspaceMoveParams, WorkspaceRenameParams,
-    WorkspaceReportMetadataParams, WorkspaceTarget,
+    WorkspaceReportMetadataParams, WorkspaceSuspendParams, WorkspaceTarget,
 };
 use crate::app::App;
 
@@ -357,6 +357,41 @@ impl App {
         }
 
         encode_success(id, ResponseResult::Ok {})
+    }
+
+    pub(super) fn handle_workspace_suspend(
+        &mut self,
+        id: String,
+        params: WorkspaceSuspendParams,
+    ) -> String {
+        let mut indices = Vec::new();
+        for workspace_id in &params.workspace_ids {
+            let Some(index) = self.parse_workspace_id(workspace_id) else {
+                return workspace_not_found(id, workspace_id);
+            };
+            if self.state.workspaces.get(index).is_none() {
+                return workspace_not_found(id, workspace_id);
+            }
+            let expanded = if params.group {
+                self.state.workspace_group_close_indices(index)
+            } else {
+                vec![index]
+            };
+            for index in expanded {
+                if !indices.contains(&index) {
+                    indices.push(index);
+                }
+            }
+        }
+        let protected = std::mem::take(&mut self.manual_suspend_protected);
+        let (suspended_tabs, skipped_tabs) = self.suspend_workspaces(&indices, &protected);
+        encode_success(
+            id,
+            ResponseResult::WorkspaceSuspended {
+                suspended_tabs,
+                skipped_tabs,
+            },
+        )
     }
 
     fn workspace_list_info(&self) -> Vec<crate::api::schema::WorkspaceInfo> {
