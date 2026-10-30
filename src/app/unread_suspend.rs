@@ -386,6 +386,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        windows,
+        ignore = "resuming a tab spawns a ConPTY shell that never exits in tests"
+    )]
     async fn suspension_preserves_custom_names_through_restore_and_resume() {
         let now = Instant::now();
         let (mut app, pane_id, terminal_id) = setup(now, Agent::Claude);
@@ -692,6 +696,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        windows,
+        ignore = "resuming a tab spawns a ConPTY shell that never exits in tests"
+    )]
     async fn suspended_session_survives_late_exit_hooks_and_snapshot_roundtrip() {
         for agent in [Agent::Claude, Agent::Codex] {
             for event_kind in ["clear", "release", "resume"] {
@@ -837,6 +845,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        windows,
+        ignore = "resuming a tab spawns a ConPTY shell that never exits in tests"
+    )]
     async fn unread_suspend_waits_24_hours_and_retains_identity_and_tab() {
         for agent in [Agent::Claude, Agent::Codex] {
             let now = Instant::now();
@@ -945,6 +957,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(
+        windows,
+        ignore = "resuming a tab spawns a ConPTY shell that never exits in tests"
+    )]
     async fn unread_suspend_opening_tab_resumes_after_exit_and_restores_title() {
         let now = Instant::now();
         let (mut app, pane_id, terminal_id) = setup(now, Agent::Codex);
