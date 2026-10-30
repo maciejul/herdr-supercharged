@@ -14,7 +14,7 @@ existing tag matching `vMAJOR.MINOR.PATCH-supercharged.NUMBER`, such as
 3. Run the workflow from the default branch, supplying the tag:
 
    ```sh
-   gh workflow run supercharged-release.yml --repo maciejul/herdr-supercharged --ref master -f tag=v0.9.5-supercharged.6
+   gh workflow run supercharged-release.yml --repo maciejul/herdr-supercharged --ref master -f tag=v0.9.5-supercharged.7
    ```
 
 4. Inspect the workflow run and the resulting release. The workflow
@@ -76,10 +76,10 @@ To replace your normal `~/.local/bin/herdr` installation on Linux x86_64/WSL:
 ```sh
 ./scripts/install-supercharged-release.sh
 # Or select a future release explicitly:
-./scripts/install-supercharged-release.sh v0.9.5-supercharged.6
+./scripts/install-supercharged-release.sh v0.9.5-supercharged.7
 ```
 
-The script defaults to `v0.9.5-supercharged.6`, checks the platform and glibc,
+The script defaults to `v0.9.5-supercharged.7`, checks the platform and glibc,
 downloads through `gh`, verifies checksums and the executable's version, then
 backs up the existing binary and atomically replaces it. It refuses to overwrite
 symlinks. Running servers, configuration, state, and integrations are untouched.
@@ -101,7 +101,7 @@ Download and verify the release, then install it under a separate name:
   set -euo pipefail
   release_dir=$(mktemp -d)
   trap 'rm -rf -- "$release_dir"' EXIT
-  gh release download v0.9.5-supercharged.6 \
+  gh release download v0.9.5-supercharged.7 \
     --repo maciejul/herdr-supercharged --dir "$release_dir" \
     --pattern herdr-linux-x86_64 --pattern SHA256SUMS \
     --pattern build-metadata.json
