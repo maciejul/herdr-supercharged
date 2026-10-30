@@ -337,6 +337,9 @@ fn link_plugin(socket_path: &Path, root: &Path) {
     ));
 }
 
+/// Plugin bundled into the binary and registered on every server start.
+const BUNDLED_RESURRECT: &str = "ntindle.herdr-resurrect";
+
 fn listed_plugin_ids(socket_path: &Path) -> Vec<String> {
     let response = request(
         socket_path,
@@ -348,6 +351,7 @@ fn listed_plugin_ids(socket_path: &Path) -> Vec<String> {
         .unwrap()
         .iter()
         .map(|plugin| plugin["plugin_id"].as_str().unwrap().to_string())
+        .filter(|id| id != BUNDLED_RESURRECT)
         .collect()
 }
 
@@ -357,6 +361,7 @@ fn saved_plugin_ids(registry_path: &Path) -> Vec<String> {
             .unwrap()
             .into_iter()
             .map(|plugin| plugin["plugin_id"].as_str().unwrap().to_string())
+            .filter(|id| id != BUNDLED_RESURRECT)
             .collect::<Vec<_>>();
     ids.sort();
     ids
