@@ -169,12 +169,9 @@ platforms = ["linux", "macos", "windows"]
         &runtime_dir,
         &["--session", "other", "plugin", "list", "--json"],
     );
-    assert_eq!(listed["result"]["plugins"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        listed["result"]["plugins"][0]["plugin_id"],
-        "example.offline"
-    );
-    assert_eq!(listed["result"]["plugins"][0]["enabled"], false);
+    assert_eq!(user_plugins(&listed).len(), 1);
+    assert_eq!(user_plugins(&listed)[0]["plugin_id"], "example.offline");
+    assert_eq!(user_plugins(&listed)[0]["enabled"], false);
 
     cleanup_test_base(&base);
 }
@@ -243,11 +240,11 @@ platforms = ["linux", "macos", "windows"]
         &["--session", "beta", "plugin", "list", "--json"],
     );
     assert_eq!(
-        beta_list["result"]["plugins"][0]["plugin_id"],
+        user_plugins(&beta_list)[0]["plugin_id"],
         "example.global-plugin"
     );
     let managed_path = PathBuf::from(
-        beta_list["result"]["plugins"][0]["source"]["managed_path"]
+        user_plugins(&beta_list)[0]["source"]["managed_path"]
             .as_str()
             .unwrap(),
     );
@@ -341,12 +338,9 @@ fn plugin_update_refreshes_selected_then_all_github_plugins() {
         &runtime_dir,
         &["--session", "updates", "plugin", "list", "--json"],
     );
-    assert_eq!(listed["result"]["plugins"][0]["enabled"], false);
-    let first_installation = PathBuf::from(
-        listed["result"]["plugins"][0]["plugin_root"]
-            .as_str()
-            .unwrap(),
-    );
+    assert_eq!(user_plugins(&listed)[0]["enabled"], false);
+    let first_installation =
+        PathBuf::from(user_plugins(&listed)[0]["plugin_root"].as_str().unwrap());
     let offline_reinstall = run_named_cli_with_env(
         &config_home,
         &runtime_dir,
@@ -368,12 +362,9 @@ fn plugin_update_refreshes_selected_then_all_github_plugins() {
         &runtime_dir,
         &["--session", "updates", "plugin", "list", "--json"],
     );
-    assert_eq!(listed["result"]["plugins"][0]["enabled"], false);
-    let second_installation = PathBuf::from(
-        listed["result"]["plugins"][0]["plugin_root"]
-            .as_str()
-            .unwrap(),
-    );
+    assert_eq!(user_plugins(&listed)[0]["enabled"], false);
+    let second_installation =
+        PathBuf::from(user_plugins(&listed)[0]["plugin_root"].as_str().unwrap());
     assert_ne!(first_installation, second_installation);
     assert!(first_installation.join("herdr-plugin.toml").exists());
     let malformed = run_named_cli(
@@ -424,9 +415,9 @@ fn plugin_update_refreshes_selected_then_all_github_plugins() {
         &runtime_dir,
         &["--session", "updates", "plugin", "list", "--json"],
     );
-    assert_eq!(listed["result"]["plugins"][0]["version"], "0.2.0");
-    assert_eq!(listed["result"]["plugins"][0]["enabled"], false);
-    assert_eq!(listed["result"]["plugins"][1]["version"], "0.1.0");
+    assert_eq!(user_plugins(&listed)[0]["version"], "0.2.0");
+    assert_eq!(user_plugins(&listed)[0]["enabled"], false);
+    assert_eq!(user_plugins(&listed)[1]["version"], "0.1.0");
 
     let local_dir = base.join("local-plugin");
     fs::create_dir_all(&local_dir).unwrap();
@@ -547,7 +538,7 @@ fn plugin_update_does_not_resurrect_a_plugin_unlinked_during_build() {
         &["--session", "race", "plugin", "list", "--json"],
     );
     let managed_path = PathBuf::from(
-        listed["result"]["plugins"][0]["source"]["managed_path"]
+        user_plugins(&listed)[0]["source"]["managed_path"]
             .as_str()
             .unwrap(),
     );
@@ -613,7 +604,7 @@ fn plugin_update_does_not_resurrect_a_plugin_unlinked_during_build() {
         &runtime_dir,
         &["--session", "race", "plugin", "list", "--json"],
     );
-    assert!(listed["result"]["plugins"].as_array().unwrap().is_empty());
+    assert!(user_plugins(&listed).is_empty());
     assert!(
         fs::read_to_string(managed_path.join("plugin/herdr-plugin.toml"))
             .unwrap()
@@ -724,11 +715,7 @@ mv "$HERDR_PLUGIN_ROOT/result-$kind.tmp" "$HERDR_PLUGIN_ROOT/result-$kind"
             &runtime_dir,
             &["--session", "beta", "plugin", "list", "--json"],
         );
-        PathBuf::from(
-            listed["result"]["plugins"][0]["plugin_root"]
-                .as_str()
-                .unwrap(),
-        )
+        PathBuf::from(user_plugins(&listed)[0]["plugin_root"].as_str().unwrap())
     };
     let launch = || {
         let action = run_named_cli_json(
@@ -909,10 +896,7 @@ command = ["sh", "-c", "sleep 5"]
 
     let listed = run_cli_json(&socket_path, &["plugin", "list", "--json"]);
     assert_eq!(listed["result"]["type"], "plugin_list");
-    assert_eq!(
-        listed["result"]["plugins"][0]["plugin_id"],
-        "example.layout"
-    );
+    assert_eq!(user_plugins(&listed)[0]["plugin_id"], "example.layout");
 
     let invoked = run_cli_json(
         &socket_path,
@@ -1091,7 +1075,7 @@ command = ["sh", "-c", "echo bootstrap"]
         &runtime_dir,
         &["--session", "other", "plugin", "list", "--json"],
     );
-    let plugin = &listed["result"]["plugins"][0];
+    let plugin = &user_plugins(&listed)[0];
     assert_eq!(plugin["plugin_id"], "example.worktree-bootstrap");
     assert_eq!(plugin["source"]["kind"], "github");
     assert_eq!(plugin["source"]["owner"], "ogulcancelik");
@@ -1144,7 +1128,7 @@ command = ["sh", "-c", "echo bootstrap"]
         &runtime_dir,
         &["--session", "other", "plugin", "list", "--json"],
     );
-    assert!(listed["result"]["plugins"].as_array().unwrap().is_empty());
+    assert!(user_plugins(&listed).is_empty());
 
     cleanup_test_base(&base);
 }
@@ -1233,7 +1217,7 @@ command = ["sh", "-c", "echo should-not-install"]
         &runtime_dir,
         &["--session", "plugins", "plugin", "list", "--json"],
     );
-    assert!(listed["result"]["plugins"].as_array().unwrap().is_empty());
+    assert!(user_plugins(&listed).is_empty());
 
     assert!(
         fs::read_dir(managed_github_plugin_dir(&config_home))
@@ -1329,7 +1313,7 @@ command = ["sh", "-c", "echo should-not-install"]
         &runtime_dir,
         &["--session", "plugins", "plugin", "list", "--json"],
     );
-    assert!(listed["result"]["plugins"].as_array().unwrap().is_empty());
+    assert!(user_plugins(&listed).is_empty());
 
     cleanup_test_base(&base);
 }
@@ -1428,7 +1412,7 @@ EOF
         &runtime_dir,
         &["--session", "plugins", "plugin", "list", "--json"],
     );
-    assert!(listed["result"]["plugins"].as_array().unwrap().is_empty());
+    assert!(user_plugins(&listed).is_empty());
 
     assert!(
         fs::read_dir(managed_github_plugin_dir(&config_home))
